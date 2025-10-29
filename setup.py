@@ -3,7 +3,7 @@ import os
 from setuptools import setup, find_packages
 
 with open(
-    os.path.join(os.path.abspath(os.path.dirname(__file__)), "src", "version.py"),
+    os.path.join(os.path.abspath(os.path.dirname(__file__)), "statsig_ai", "version.py"),
     encoding="utf-8",
 ) as f:
     exec(f.read())

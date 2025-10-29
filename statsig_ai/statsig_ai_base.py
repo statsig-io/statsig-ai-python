@@ -99,10 +99,7 @@ class StatsigAIInstance:
             possible_next_param_store_names = next_param_store.get_string(
                 "prompt_targeting_rules", ""
             )
-            if (
-                possible_next_param_store_names == ""
-                or possible_next_param_store_names == next_param_store_name
-            ):
+            if possible_next_param_store_names in [next_param_store_name, ""]:
                 current_param_store_name = next_param_store_name
                 break
             current_param_store_name = next_param_store_name
@@ -153,7 +150,7 @@ class StatsigAIInstance:
         )
 
     def _set_up_otel(
-        self, sdk_key: str, options: Optional[StatsigAIOptions] = None
+        self, _sdk_key: str, options: Optional[StatsigAIOptions] = None
     ) -> None:
         if (
             options is None

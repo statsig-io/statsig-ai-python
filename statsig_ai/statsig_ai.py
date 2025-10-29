@@ -1,5 +1,4 @@
 from typing import Optional, Union, overload
-from statsig_python_core import Statsig, StatsigOptions
 from .statsig_ai_base import StatsigAIInstance
 from .statsig_ai_options import StatsigAIOptions
 from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig

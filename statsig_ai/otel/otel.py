@@ -48,7 +48,7 @@ def initialize_otel(options: Optional[InitializeOptions] = None):
             # In Python, the default context manager is thread-local.
             # For async frameworks, additional libraries (e.g., asyncio contextvars) can be used.
             context.attach(context.get_current())
-        except Exception as e:
+        except Exception:
             print(
                 "Could not automatically set up a global OTEL context manager.\n"
                 "This may be expected if you or another library already set one.\n"
