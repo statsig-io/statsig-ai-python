@@ -28,14 +28,14 @@ jobs:
           pip install --upgrade .[test]
 
       - name: Run Linter
-        run: pylint ./statsig-ai --rcfile .pylintrc
+        run: pylint ./statsig_ai --rcfile .pylintrc
 
       - name: Run Type Checker
         run: |
           pip install types-requests
           pip install types-redis
           pip install types-protobuf
-          mypy ./statsig-ai --check-untyped-defs
+          mypy ./statsig_ai --check-untyped-defs
 
       # - name: Run Tests
       #   run: python3 -m unittest discover -s ./tests --verbose

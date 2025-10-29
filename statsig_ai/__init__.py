@@ -1,4 +1,3 @@
-from .statsig_ai_base import StatsigAIInstance
 from .statsig_ai_options import StatsigAIOptions
 from .prompt import PromptEvaluationOptions, Prompt
 from .ai_eval_grade_data import AIEvalGradeData
@@ -9,9 +8,11 @@ from .otel import (
     StatsigSpanProcessor,
     StatsigOTLPTraceExporter,
 )
+from .statsig_ai import StatsigAI
+
+from statsig_python_core import Statsig, StatsigOptions, StatsigUser
 
 __all__ = [
-    "StatsigAIInstance",
     "StatsigAIOptions",
     "Prompt",
     "PromptEvaluationOptions",
@@ -21,4 +22,9 @@ __all__ = [
     "OtelSingleton",
     "StatsigSpanProcessor",
     "StatsigOTLPTraceExporter",
+    "StatsigAI",
+    # Re-export from statsig-python-core for convenience
+    "Statsig",
+    "StatsigOptions",
+    "StatsigUser",
 ]

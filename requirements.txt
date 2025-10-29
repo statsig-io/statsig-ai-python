@@ -5,3 +5,6 @@ opentelemetry-sdk
 opentelemetry-semantic-conventions
 opentelemetry-api
 python-dotenv
+pytest
+pytest-httpserver
+werkzeug

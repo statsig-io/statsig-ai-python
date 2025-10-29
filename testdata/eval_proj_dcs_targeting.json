@@ -1,0 +1,760 @@
+{
+  "dynamic_configs": {
+    "test": {
+      "type": "dynamic_config",
+      "salt": "c670fb0f-d6c4-4ef4-b7a7-9246b37a57e1",
+      "enabled": true,
+      "defaultValue": {},
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "prompt:2zMuUzehqVugoL5CaS08xh": {
+      "type": "dynamic_config",
+      "salt": "fd4c8533-d7be-4d75-b1d7-a1ba04e2a72f",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "content": "Hello!",
+            "role": "system"
+          }
+        ],
+        "name": "Version 1",
+        "temperature": 1,
+        "maxTokens": 1000,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-5",
+        "workflowBody": {
+          "type": "JSON",
+          "value": "{}"
+        },
+        "evalModel": "gpt-5",
+        "type": "Live",
+        "aiConfigName": "test-prompt-1"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 2
+    },
+    "prompt:36qqmfh8wHcKzjmX2My2RQ": {
+      "type": "dynamic_config",
+      "salt": "076db3eb-dfd3-4820-8747-b1b1bfbbc602",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "content": "How's it going?",
+            "role": "system"
+          }
+        ],
+        "name": "Version 1",
+        "temperature": 2,
+        "maxTokens": 1000,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-4.1",
+        "workflowBody": {
+          "type": "JSON",
+          "value": "{}"
+        },
+        "evalModel": "gpt-5",
+        "type": "Live",
+        "aiConfigName": "test-prompt-3"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 3
+    },
+    "prompt:6p8nIvJsfMW7Awnum7aZk5": {
+      "type": "dynamic_config",
+      "salt": "6fd9d5af-c6ba-4e32-86f1-d61c76b48518",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "content": "Hello!",
+            "role": "system"
+          }
+        ],
+        "name": "Version 2",
+        "temperature": 1,
+        "maxTokens": 1000,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-5",
+        "workflowBody": {
+          "type": "JSON",
+          "value": "{}"
+        },
+        "evalModel": "gpt-5",
+        "type": "Candidate",
+        "aiConfigName": "test-prompt-1"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "prompt:6tNdowtW2qiWkaUhK1H8UU": {
+      "type": "dynamic_config",
+      "salt": "7eadd62d-0db9-4158-b793-e9da3c0e04fa",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "content": "Hello!",
+            "role": "system"
+          }
+        ],
+        "name": "Version 3",
+        "temperature": 1,
+        "maxTokens": 1000,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-5",
+        "workflowBody": {
+          "type": "JSON",
+          "value": "{}"
+        },
+        "evalModel": "gpt-5",
+        "type": "Candidate",
+        "aiConfigName": "test-prompt-1"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "welcome_message": {
+      "type": "dynamic_config",
+      "salt": "1705811f-e121-455b-8422-91d7ba65aba5",
+      "enabled": true,
+      "defaultValue": {
+        "title": "",
+        "subtitle": ""
+      },
+      "rules": [
+        {
+          "name": "5nGRWQVLhyQlvtLhLDPlza-5nGRWLWDUGnSzf7uYg2rE4",
+          "passPercentage": 100,
+          "conditions": ["2196684211", "3792417514"],
+          "returnValue": {
+            "title": "Welcome!",
+            "subtitle": "Let's get started"
+          },
+          "id": "5nGRWQVLhyQlvtLhLDPlza-5nGRWLWDUGnSzf7uYg2rE4",
+          "salt": "568684fe-611d-4674-bc62-6d237e16b731",
+          "idType": "userID"
+        },
+        {
+          "name": "5nGRWQVLhyQlvtLhLDPlza-5nGRWNBGmYxmSEFqznY4X6",
+          "passPercentage": 100,
+          "conditions": ["2196684211", "221306506"],
+          "returnValue": {
+            "title": "Welcome to the app!",
+            "subtitle": "We’re excited to have you. Let’s set things up."
+          },
+          "id": "5nGRWQVLhyQlvtLhLDPlza-5nGRWNBGmYxmSEFqznY4X6",
+          "salt": "568684fe-611d-4674-bc62-6d237e16b731",
+          "idType": "userID"
+        },
+        {
+          "name": "5nGRWQVLhyQlvtLhLDPlza-5nGRWPgIPgGRc4dmavTIg8",
+          "passPercentage": 100,
+          "conditions": ["2196684211", "1710057219"],
+          "returnValue": {
+            "title": "Welcome to your new dashboard!",
+            "subtitle": "We're thrilled to have you on board. Let's walk through a few quick steps to help you get the most out of your experience."
+          },
+          "id": "5nGRWQVLhyQlvtLhLDPlza-5nGRWPgIPgGRc4dmavTIg8",
+          "salt": "568684fe-611d-4674-bc62-6d237e16b731",
+          "idType": "userID"
+        },
+        {
+          "name": "5nGRWQVLhyQlvtLhLDPlza-redirectToDefault",
+          "passPercentage": 0,
+          "conditions": ["2196684211"],
+          "returnValue": {},
+          "id": "5nGRWQVLhyQlvtLhLDPlza-redirectToDefault",
+          "salt": "568684fe-611d-4674-bc62-6d237e16b731",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 4
+    },
+    "prompt:2QGncLi0YSYj9zavJ825qB": {
+      "type": "dynamic_config",
+      "salt": "90c69c9e-41d3-467b-b06c-b7545f2258a9",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "content": "Good Morning!",
+            "role": "system"
+          }
+        ],
+        "name": "Version 1",
+        "temperature": 0,
+        "maxTokens": 1000,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-4o",
+        "workflowBody": {
+          "type": "JSON",
+          "value": "{}"
+        },
+        "evalModel": "gpt-5",
+        "type": "Live",
+        "aiConfigName": "test-prompt-2"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 4
+    },
+    "prompt:circular-a-version": {
+      "type": "dynamic_config",
+      "salt": "circular-a-version-salt",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "content": "Circular A!",
+            "role": "system"
+          }
+        ],
+        "name": "Circular A Version",
+        "temperature": 1,
+        "maxTokens": 500,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-4",
+        "workflowBody": {
+          "type": "JSON",
+          "value": "{}"
+        },
+        "evalModel": "gpt-5",
+        "type": "Live",
+        "aiConfigName": "test-prompt-circular-a"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "prompt:circular-b-version": {
+      "type": "dynamic_config",
+      "salt": "circular-b-version-salt",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "content": "Circular B!",
+            "role": "system"
+          }
+        ],
+        "name": "Circular B Version",
+        "temperature": 2,
+        "maxTokens": 600,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-4",
+        "workflowBody": {
+          "type": "JSON",
+          "value": "{}"
+        },
+        "evalModel": "gpt-5",
+        "type": "Live",
+        "aiConfigName": "test-prompt-circular-b"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "prompt_targeting_rules:test-prompt-1": {
+      "type": "dynamic_config",
+      "salt": "48ec031d-6ee9-48dd-8c04-cf4a77c29d95",
+      "enabled": true,
+      "defaultValue": {
+        "target": "prompt:test-prompt-1"
+      },
+      "rules": [
+        {
+          "name": "6v1LmmDS2L2ssn1h4uwvqQ",
+          "passPercentage": 100,
+          "conditions": ["1439274298"],
+          "returnValue": {
+            "target": "prompt:test-prompt-2"
+          },
+          "id": "6v1LmmDS2L2ssn1h4uwvqQ",
+          "salt": "0ea1ba3f-66df-48f2-9d64-fadf5bcfaf98",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 2
+    },
+    "prompt_targeting_rules:test-prompt-2": {
+      "type": "dynamic_config",
+      "salt": "f5a3789f-7d1e-4bd3-b209-a16a91f6537b",
+      "enabled": true,
+      "defaultValue": {
+        "target": "prompt:test-prompt-2"
+      },
+      "rules": [
+        {
+          "name": "6VGI7ssx2WpAMefeI4OWUA",
+          "passPercentage": 100,
+          "conditions": ["3836676744"],
+          "returnValue": {
+            "target": "prompt:test-prompt-3"
+          },
+          "id": "6VGI7ssx2WpAMefeI4OWUA",
+          "salt": "c19acdbc-bff2-4f70-a928-be36937df054",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 2
+    },
+    "prompt_targeting_rules:test-prompt-circular-a": {
+      "type": "dynamic_config",
+      "salt": "circular-a-salt",
+      "enabled": true,
+      "defaultValue": {
+        "target": "prompt:test-prompt-circular-a"
+      },
+      "rules": [
+        {
+          "name": "circular-rule-a",
+          "passPercentage": 100,
+          "conditions": ["1828919350"],
+          "returnValue": {
+            "target": "prompt:test-prompt-circular-b"
+          },
+          "id": "circular-rule-a",
+          "salt": "circular-a-rule-salt",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "prompt_targeting_rules:test-prompt-circular-b": {
+      "type": "dynamic_config",
+      "salt": "circular-b-salt",
+      "enabled": true,
+      "defaultValue": {
+        "target": "prompt:test-prompt-circular-b"
+      },
+      "rules": [
+        {
+          "name": "circular-rule-b",
+          "passPercentage": 100,
+          "conditions": ["1828919350"],
+          "returnValue": {
+            "target": "prompt:test-prompt-circular-a"
+          },
+          "id": "circular-rule-b",
+          "salt": "circular-b-rule-salt",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    }
+  },
+  "feature_gates": {
+    "pink_button_color": {
+      "type": "feature_gate",
+      "salt": "94a395fb-8648-4d21-9c78-98fd720152b1",
+      "enabled": true,
+      "defaultValue": false,
+      "rules": [
+        {
+          "name": "7keNDlPN0n5zL7zro9BYnI",
+          "passPercentage": 100,
+          "conditions": ["1828919350"],
+          "returnValue": true,
+          "id": "7keNDlPN0n5zL7zro9BYnI",
+          "salt": "05f8afae-ed55-433b-80f4-52f10c169d0e",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "feature_gate",
+      "version": 5
+    },
+    "clothing_label": {
+      "type": "feature_gate",
+      "salt": "059cf8df-88f5-4aee-b0e3-3c6cc5bf1412",
+      "enabled": true,
+      "defaultValue": false,
+      "rules": [
+        {
+          "name": "4jAPsXW3cTcHgk5rQo8p0B:0.00:1",
+          "passPercentage": 0,
+          "conditions": ["1828919350"],
+          "returnValue": true,
+          "id": "4jAPsXW3cTcHgk5rQo8p0B:0.00:1",
+          "salt": "072ee737-5577-41a5-8cda-d161bfd45770",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "feature_gate",
+      "version": 7
+    },
+    "shop_now_button": {
+      "type": "feature_gate",
+      "salt": "e2dc5ea3-9cb3-4316-bc64-d9993b882cb5",
+      "enabled": true,
+      "defaultValue": false,
+      "rules": [
+        {
+          "name": "5jpKm6DdJdWXbdlgSgegKg:0.00:2",
+          "passPercentage": 0,
+          "conditions": ["1828919350"],
+          "returnValue": true,
+          "id": "5jpKm6DdJdWXbdlgSgegKg:0.00:2",
+          "salt": "6f199bc1-2557-4a3e-9235-4fe4c7a525d4",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "feature_gate",
+      "version": 9
+    },
+    "new_theme": {
+      "type": "feature_gate",
+      "salt": "540cb184-d530-4a1a-8448-a02716b752b7",
+      "enabled": true,
+      "defaultValue": false,
+      "rules": [
+        {
+          "name": "5ZvVUnXpYq26x3PTnocRhq:100.00:3",
+          "passPercentage": 100,
+          "conditions": ["1828919350"],
+          "returnValue": true,
+          "id": "5ZvVUnXpYq26x3PTnocRhq:100.00:3",
+          "salt": "2fa2b226-4000-4055-8dae-5798ef8e4689",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "feature_gate",
+      "version": 10
+    },
+    "test_public": {
+      "type": "feature_gate",
+      "salt": "880396b8-f724-4f3e-93de-9c9777a4793f",
+      "enabled": true,
+      "defaultValue": false,
+      "rules": [
+        {
+          "name": "GJwCavEWSyGPfBkHuozAN",
+          "passPercentage": 100,
+          "conditions": ["4176578173"],
+          "returnValue": true,
+          "id": "GJwCavEWSyGPfBkHuozAN",
+          "salt": "61bf62b8-869c-4666-bdd4-a8604b0a4d9c",
+          "idType": "userID"
+        }
+      ],
+      "idType": "userID",
+      "entity": "feature_gate",
+      "version": 3
+    }
+  },
+  "experiment_to_layer": {},
+  "layer_configs": {
+    "test-prompt-1": {
+      "type": "dynamic_config",
+      "salt": "8ee6a274-6371-46a1-96bf-21cd7b351334",
+      "enabled": true,
+      "defaultValue": {
+        "live": "prompt:2zMuUzehqVugoL5CaS08xh"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "layer",
+      "version": 3
+    },
+    "test-prompt-2": {
+      "type": "dynamic_config",
+      "salt": "c454f318-3b5f-45ee-8895-9989af711720",
+      "enabled": true,
+      "defaultValue": {
+        "live": "prompt:2QGncLi0YSYj9zavJ825qB"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "layer",
+      "version": 5
+    },
+    "test-prompt-3": {
+      "type": "dynamic_config",
+      "salt": "93b1f19f-4155-4647-b928-e03905661f82",
+      "enabled": true,
+      "defaultValue": {
+        "live": "prompt:36qqmfh8wHcKzjmX2My2RQ"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "layer",
+      "version": 4
+    },
+    "test-prompt-circular-a": {
+      "type": "dynamic_config",
+      "salt": "circular-a-layer-salt",
+      "enabled": true,
+      "defaultValue": {
+        "live": "prompt:circular-a-version"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "layer",
+      "version": 1
+    },
+    "test-prompt-circular-b": {
+      "type": "dynamic_config",
+      "salt": "circular-b-layer-salt",
+      "enabled": true,
+      "defaultValue": {
+        "live": "prompt:circular-b-version"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "layer",
+      "version": 1
+    }
+  },
+  "has_updates": true,
+  "time": 1761344441427,
+  "company_id": "4YuaNK3ALJ4uCgz6P2oEPs",
+  "condition_map": {
+    "221306506": {
+      "type": "user_bucket",
+      "targetValue": 660,
+      "operator": "lt",
+      "field": null,
+      "additionalValues": {
+        "salt": "1705811f-e121-455b-8422-91d7ba65aba5.568684fe-611d-4674-bc62-6d237e16b731"
+      },
+      "idType": "userID"
+    },
+    "1439274298": {
+      "type": "user_field",
+      "targetValue": ["test-user-1", "test-user"],
+      "operator": "any",
+      "field": "userID",
+      "additionalValues": {},
+      "idType": "userID"
+    },
+    "1710057219": {
+      "type": "user_bucket",
+      "targetValue": 1000,
+      "operator": "lt",
+      "field": null,
+      "additionalValues": {
+        "salt": "1705811f-e121-455b-8422-91d7ba65aba5.568684fe-611d-4674-bc62-6d237e16b731"
+      },
+      "idType": "userID"
+    },
+    "1828919350": {
+      "type": "public",
+      "targetValue": null,
+      "operator": null,
+      "field": null,
+      "additionalValues": {},
+      "idType": "userID"
+    },
+    "2196684211": {
+      "type": "ip_based",
+      "targetValue": ["US"],
+      "operator": "any",
+      "field": "country",
+      "additionalValues": {},
+      "idType": "userID"
+    },
+    "3792417514": {
+      "type": "user_bucket",
+      "targetValue": 330,
+      "operator": "lt",
+      "field": null,
+      "additionalValues": {
+        "salt": "1705811f-e121-455b-8422-91d7ba65aba5.568684fe-611d-4674-bc62-6d237e16b731"
+      },
+      "idType": "userID"
+    },
+    "3836676744": {
+      "type": "user_field",
+      "targetValue": ["test-user-1"],
+      "operator": "any",
+      "field": "userID",
+      "additionalValues": {},
+      "idType": "userID"
+    },
+    "4176578173": {
+      "type": "user_field",
+      "targetValue": ["test-user-1234"],
+      "operator": "any",
+      "field": "userID",
+      "additionalValues": {},
+      "idType": "userID"
+    }
+  },
+  "response_format": "dcs-v2",
+  "param_stores": {
+    "prompt:test-prompt-1": {
+      "parameters": {
+        "live": {
+          "name": "live",
+          "param_type": "object",
+          "ref_type": "layer",
+          "layer_name": "test-prompt-1",
+          "param_name": "live"
+        },
+        "prompt_targeting_rules": {
+          "name": "prompt_targeting_rules",
+          "param_type": "object",
+          "ref_type": "dynamic_config",
+          "config_name": "prompt_targeting_rules:test-prompt-1",
+          "param_name": "target"
+        },
+        "candidates": {
+          "name": "candidates",
+          "param_type": "array",
+          "ref_type": "static",
+          "value": [
+            "prompt:6p8nIvJsfMW7Awnum7aZk5",
+            "prompt:6tNdowtW2qiWkaUhK1H8UU"
+          ]
+        }
+      },
+      "targetAppIDs": [],
+      "version": 5
+    },
+    "prompt:test-prompt-2": {
+      "parameters": {
+        "live": {
+          "name": "live",
+          "param_type": "object",
+          "ref_type": "layer",
+          "layer_name": "test-prompt-2",
+          "param_name": "live"
+        },
+        "prompt_targeting_rules": {
+          "name": "prompt_targeting_rules",
+          "param_type": "object",
+          "ref_type": "dynamic_config",
+          "config_name": "prompt_targeting_rules:test-prompt-2",
+          "param_name": "target"
+        }
+      },
+      "targetAppIDs": [],
+      "version": 3
+    },
+    "prompt:test-prompt-3": {
+      "parameters": {
+        "live": {
+          "name": "live",
+          "param_type": "object",
+          "ref_type": "layer",
+          "layer_name": "test-prompt-3",
+          "param_name": "live"
+        }
+      },
+      "targetAppIDs": [],
+      "version": 2
+    },
+    "prompt:test-prompt-circular-a": {
+      "parameters": {
+        "live": {
+          "name": "live",
+          "param_type": "object",
+          "ref_type": "layer",
+          "layer_name": "test-prompt-circular-a",
+          "param_name": "live"
+        },
+        "prompt_targeting_rules": {
+          "name": "prompt_targeting_rules",
+          "param_type": "object",
+          "ref_type": "dynamic_config",
+          "config_name": "prompt_targeting_rules:test-prompt-circular-a",
+          "param_name": "target"
+        }
+      },
+      "targetAppIDs": [],
+      "version": 1
+    },
+    "prompt:test-prompt-circular-b": {
+      "parameters": {
+        "live": {
+          "name": "live",
+          "param_type": "object",
+          "ref_type": "layer",
+          "layer_name": "test-prompt-circular-b",
+          "param_name": "live"
+        },
+        "prompt_targeting_rules": {
+          "name": "prompt_targeting_rules",
+          "param_type": "object",
+          "ref_type": "dynamic_config",
+          "config_name": "prompt_targeting_rules:test-prompt-circular-b",
+          "param_name": "target"
+        }
+      },
+      "targetAppIDs": [],
+      "version": 1
+    }
+  },
+  "session_replay_info": {
+    "sampling_rate": 1,
+    "recording_blocked": false
+  },
+  "id_lists": {},
+  "diagnostics": {
+    "initialize": 10000,
+    "dcs": 1000,
+    "download_config_specs": 1000,
+    "idlist": 100,
+    "get_id_list": 100,
+    "get_id_list_sources": 100,
+    "log": 100,
+    "log_event": 100,
+    "api_call": 100
+  },
+  "sdk_configs": {
+    "event_queue_size": 2000,
+    "event_content_encoding": "gzip",
+    "sampling_mode": "none"
+  },
+  "checksum": "7455383234386657000"
+}

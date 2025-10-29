@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union, overload
+from typing import Any, Optional, TypedDict, Union, overload
 
 from statsig_python_core import Statsig, StatsigOptions
 from .prompt import make_prompt, PromptEvaluationOptions
@@ -7,16 +7,14 @@ from .statsig_ai_options import StatsigAIOptions
 from .prompt_version import PromptVersion
 
 
-class StatsigCreateConfig:
-    def __init__(self, sdk_key: str, statsig_options: Optional[StatsigOptions] = None):
-        self.sdk_key = sdk_key
-        self.statsig_options = statsig_options
+class StatsigCreateConfig(TypedDict, total=False):
+    sdk_key: str
+    statsig_options: Optional[StatsigOptions]
 
 
-class StatsigAttachConfig:
-    def __init__(self, sdk_key: str, statsig: Statsig):
-        self.sdk_key = sdk_key
-        self.statsig = statsig
+class StatsigAttachConfig(TypedDict):
+    sdk_key: str
+    statsig: Statsig
 
 
 StatsigSourceConfig = Union[StatsigCreateConfig, StatsigAttachConfig]

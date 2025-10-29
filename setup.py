@@ -14,13 +14,13 @@ with open(
 ) as r:
     README = r.read()
 
-test_deps = ["requests", "user_agents", "semver"]
+test_deps = ["pytest", "pytest-httpserver", "werkzeug", "statsig-python-core"]
 extras = {
     "test": test_deps,
 }
 
 setup(
-    name="statsig-ai",
+    name="statsig_ai",
     # pylint: disable=undefined-variable
     version=__version__,  # type: ignore
     description="Statsig Python Server SDK",
@@ -46,6 +46,6 @@ setup(
     tests_require=test_deps,
     extras_require=extras,
     include_package_data=True,
-    packages=find_packages(include=["statsig-ai"]),
+    packages=find_packages(include=["statsig_ai"]),
     python_requires=">=3.9",
 )
