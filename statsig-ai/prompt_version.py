@@ -1,6 +1,6 @@
+import re
 from typing import Any, Dict, List, Optional, TypedDict
 from statsig_python_core import DynamicConfig
-import re
 
 
 PromptParams = Dict[str, Any]

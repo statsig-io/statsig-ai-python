@@ -38,6 +38,10 @@ setup(
     ],
     install_requires=[
         "statsig-python-core",
+        "opentelemetry-api>=1.27.0",
+        "opentelemetry-sdk>=1.27.0",
+        "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+        "opentelemetry-semantic-conventions>=0.48b0",
     ],
     tests_require=test_deps,
     extras_require=extras,

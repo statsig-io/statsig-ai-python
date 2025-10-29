@@ -1,6 +1,10 @@
-from typing import List
+from typing import List, TypedDict
 from statsig_python_core import Statsig, ParameterStore, StatsigUser
 from .prompt_version import PromptVersion
+
+
+class PromptEvaluationOptions(TypedDict):
+    pass
 
 
 class Prompt:
@@ -19,7 +23,7 @@ class Prompt:
         return self.candicates
 
 
-def get_prompt(
+def make_prompt(
     statsig: Statsig, name: str, paramStore: ParameterStore, user: StatsigUser
 ) -> Prompt:
     live_config_id = paramStore.get_string("live", "")

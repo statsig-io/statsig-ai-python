@@ -1,2 +1,0 @@
-statsig-python-core
-setuptools

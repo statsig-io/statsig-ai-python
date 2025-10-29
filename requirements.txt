@@ -1,0 +1,7 @@
+statsig-python-core
+setuptools
+opentelemetry-exporter-otlp-proto-http
+opentelemetry-sdk
+opentelemetry-semantic-conventions
+opentelemetry-api
+python-dotenv

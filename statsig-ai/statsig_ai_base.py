@@ -1,7 +1,7 @@
 from typing import Any, Optional, Union, overload
 
 from statsig_python_core import Statsig, StatsigOptions
-from .prompt import make_prompt
+from .prompt import make_prompt, PromptEvaluationOptions
 from .ai_eval_grade_data import AIEvalGradeData
 from .statsig_ai_options import StatsigAIOptions
 from .prompt_version import PromptVersion
@@ -80,7 +80,10 @@ class StatsigAIInstance:
         return self._statsig
 
     def get_prompt(
-        self, user: Any, prompt_name: str, options: Optional[Any] = None
+        self,
+        user: Any,
+        prompt_name: str,
+        _options: Optional[PromptEvaluationOptions] = None,
     ) -> Any:
         MAX_DEPTH = 300
         depth = 0
@@ -102,7 +105,7 @@ class StatsigAIInstance:
                 possible_next_param_store_names == ""
                 or possible_next_param_store_names == next_param_store_name
             ):
-                current_param_store = next_param_store_name
+                current_param_store_name = next_param_store_name
                 break
             current_param_store_name = next_param_store_name
             next_param_store_name = possible_next_param_store_names
