@@ -1,0 +1,49 @@
+import os
+
+from setuptools import setup, find_packages
+
+with open(
+    os.path.join(os.path.abspath(os.path.dirname(__file__)), "statsig-ai", "version.py"),
+    encoding="utf-8",
+) as f:
+    exec(f.read())
+
+with open(
+    os.path.join(os.path.abspath(os.path.dirname(__file__)), "README.md"),
+    encoding="utf-8",
+) as r:
+    README = r.read()
+
+test_deps = ["requests", "user_agents", "semver"]
+extras = {
+    "test": test_deps,
+}
+
+setup(
+    name="statsig-ai",
+    # pylint: disable=undefined-variable
+    version=__version__,  # type: ignore
+    description="Statsig Python Server SDK",
+    long_description=README,
+    long_description_content_type="text/markdown",
+    author="",
+    author_email="",
+    url="https://github.com/statsig-io/statsig-ai-python",
+    license="ISC",
+    classifiers=[
+        "Intended Audience :: Developers",
+        "Programming Language :: Python",
+        "Programming Language :: Python :: 3",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+    ],
+    install_requires=[
+        "statsig-python-core",
+    ],
+    tests_require=test_deps,
+    extras_require=extras,
+    include_package_data=True,
+    packages=find_packages(
+        include=["statsig-ai"]
+    ),
+    python_requires=">=3.9",
+)
