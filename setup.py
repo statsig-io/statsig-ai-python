@@ -3,7 +3,7 @@ import os
 from setuptools import setup, find_packages
 
 with open(
-    os.path.join(os.path.abspath(os.path.dirname(__file__)), "statsig-ai", "version.py"),
+    os.path.join(os.path.abspath(os.path.dirname(__file__)), "src", "version.py"),
     encoding="utf-8",
 ) as f:
     exec(f.read())
@@ -42,8 +42,6 @@ setup(
     tests_require=test_deps,
     extras_require=extras,
     include_package_data=True,
-    packages=find_packages(
-        include=["statsig-ai"]
-    ),
+    packages=find_packages(include=["statsig-ai"]),
     python_requires=">=3.9",
 )

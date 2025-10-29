@@ -1,1 +1,2 @@
-statsig
+statsig-python-core
+setuptools
