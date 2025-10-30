@@ -1,5 +1,4 @@
-name: tests
-
+name: Lint
 on:
   workflow_dispatch:
   pull_request:

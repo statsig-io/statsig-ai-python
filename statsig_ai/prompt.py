@@ -1,6 +1,7 @@
 from typing import List, TypedDict
-from statsig_python_core import Statsig, ParameterStore, StatsigUser
+from statsig_python_core import Statsig, StatsigUser
 from .prompt_version import PromptVersion
+from .statsig_core_types import ParameterStore
 
 
 class PromptEvaluationOptions(TypedDict):

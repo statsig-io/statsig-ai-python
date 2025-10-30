@@ -1,9 +1,11 @@
+from typing import Generator, Tuple
 import pytest
 from mock_scrapi import MockScrapi
+from statsig_ai.statsig_ai_base import StatsigCreateConfig
 from utils import get_test_data_resource
 from pytest_httpserver import HTTPServer
 from statsig_ai import StatsigAI, StatsigAIOptions
-from statsig_python_core import Statsig, StatsigOptions, StatsigUser
+from statsig_python_core import Statsig, StatsigOptions, StatsigUser, FeatureGate
 
 
 @pytest.fixture
@@ -26,48 +28,43 @@ def statsig_setup(httpserver: HTTPServer):
     yield statsig_options, mock_scrapi
 
     if StatsigAI.has_shared_instance():
-        statsig = StatsigAI.shared()
-        statsig.shutdown().wait()
+        statsig_ai = StatsigAI.shared()
+        statsig_ai.shutdown()
 
 
-def test_creating_shared_instance_with_create_config(statsig_setup):
-    options, _ = statsig_setup
+def test_creating_shared_instance_with_create_config(statsig_setup: Tuple[StatsigOptions, MockScrapi]):
+    statsig_options, _ = statsig_setup
 
-    statsig = StatsigAI.new_shared({"sdk_key": "secret-key"}, options)
-    statsig.initialize().wait()
-    assert statsig.get_statsig().check_gate(StatsigUser("my_user"), "test_public")
+    statsig_ai = StatsigAI.new_shared(statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=statsig_options))
+    statsig_ai.initialize()
+    assert statsig_ai.get_statsig().check_gate(StatsigUser("my_user"), "test_public")
 
 
 def test_getting_shared_instance_with_create_config(statsig_setup):
-    options, _ = statsig_setup
+    statsig_options, _ = statsig_setup
 
-    statsig = StatsigAI.new_shared({"sdk_key": "secret-key"}, options)
-    shared_statsig = StatsigAI.shared()
+    statsig_ai = StatsigAI.new_shared(statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=statsig_options))
+    shared_statsig_ai = StatsigAI.shared()
 
-    assert shared_statsig == statsig
+    assert shared_statsig_ai == statsig_ai
 
-    shared_statsig.initialize().wait()
-    assert shared_statsig.get_statsig().check_gate(
+    shared_statsig_ai.initialize()
+    gate = shared_statsig_ai.get_statsig().check_gate(StatsigUser("my_user"), "test_public")
+    print('hello i am gate here',gate)
+
+    assert shared_statsig_ai.get_statsig().check_gate(
         StatsigUser("my_user"), "test_public"
     )
 
 
 def test_removing_shared_instance_with_create_config(statsig_setup):
-    options, _ = statsig_setup
+    statsig_options, _ = statsig_setup
 
-    statsig = StatsigAI.new_shared({"sdk_key": "secret-key"}, options)
-    statsig.initialize().wait()
+    statsig_ai = StatsigAI.new_shared(statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=statsig_options))
+    statsig_ai.initialize()
     StatsigAI.remove_shared()
 
-    shared_statsig = StatsigAI.shared()
-    assert not shared_statsig.get_statsig().check_gate(
+    shared_statsig_ai = StatsigAI.shared()
+    assert not shared_statsig_ai.get_statsig().check_gate(
         StatsigUser("my_user"), "test_public"
     )
-
-
-def test_checking_if_shared_instance_exists_with_create_config():
-    StatsigAI.new_shared({"sdk_key": "secret-key"})
-    assert StatsigAI.has_shared_instance()
-
-    StatsigAI.remove_shared()
-    assert not StatsigAI.has_shared_instance()

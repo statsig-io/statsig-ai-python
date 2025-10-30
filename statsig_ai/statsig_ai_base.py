@@ -1,4 +1,4 @@
-from typing import Any, Optional, TypedDict, Union, overload
+from typing import Any, Never, Optional, TypedDict, Union, overload
 
 from statsig_python_core import Statsig, StatsigOptions
 from .prompt import make_prompt, PromptEvaluationOptions
@@ -7,14 +7,16 @@ from .statsig_ai_options import StatsigAIOptions
 from .prompt_version import PromptVersion
 
 
-class StatsigCreateConfig(TypedDict, total=False):
-    sdk_key: str
-    statsig_options: Optional[StatsigOptions]
+class StatsigCreateConfig():
+    def __init__(self, sdk_key: str, statsig_options: Optional[StatsigOptions] = None):
+        self.sdk_key = sdk_key
+        self.statsig_options = statsig_options
 
 
-class StatsigAttachConfig(TypedDict):
-    sdk_key: str
-    statsig: Statsig
+class StatsigAttachConfig():
+    def __init__(self, sdk_key: str, statsig: Statsig):
+        self.sdk_key = sdk_key
+        self.statsig = statsig
 
 
 StatsigSourceConfig = Union[StatsigCreateConfig, StatsigAttachConfig]
@@ -25,40 +27,23 @@ class StatsigAIInstance:
     _statsig: Statsig
     _owns_statsig_instance: bool
 
-    @overload
-    def __init__(
-        self,
-        statsig_source: StatsigCreateConfig,
-        ai_options: Optional[StatsigAIOptions] = None,
-    ) -> None: ...
-    @overload
-    def __init__(
-        self,
-        statsig_source: StatsigAttachConfig,
-        ai_options: Optional[StatsigAIOptions] = None,
-    ) -> None: ...
-
     def __init__(
         self,
         statsig_source: StatsigSourceConfig,
         ai_options: Optional[StatsigAIOptions] = None,
-    ) -> None:
-        self._otel = None
-
-        if hasattr(statsig_source, "statsig"):
+    ):
+        if isinstance(statsig_source, StatsigAttachConfig):
             self._statsig = statsig_source.statsig
             self._owns_statsig_instance = False
             self._set_up_otel(statsig_source.sdk_key, ai_options)
         else:
-            self._statsig = Statsig(
-                statsig_source.sdk_key, statsig_source.statsig_options
-            )
+            self._statsig = Statsig(statsig_source.sdk_key, statsig_source.statsig_options)
             self._owns_statsig_instance = True
             self._set_up_otel(statsig_source.sdk_key, ai_options)
 
     def initialize(self) -> None:
         if self._owns_statsig_instance:
-            self._statsig.initialize()
+            self._statsig.initialize().wait()
         if self._otel is not None:
             self._otel.initialize()
 
@@ -74,7 +59,7 @@ class StatsigAIInstance:
         if self._otel is not None:
             self._otel.shutdown()
 
-    def get_statsig(self) -> Optional[Statsig]:
+    def get_statsig(self) -> Statsig:
         return self._statsig
 
     def get_prompt(
