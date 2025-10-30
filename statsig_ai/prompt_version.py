@@ -57,7 +57,10 @@ class PromptVersion:
         return self._prompt_variant.get_string("model", fallback)
 
     def get_workflow_body(self, fallback: Dict[str, Any]) -> Dict[str, Any]:
-        return self._prompt_variant.get_object_json("workflowBody", json.dumps(fallback))
+        workflow_body_json = self._prompt_variant.get_object_json(
+            "workflowBody", json.dumps(fallback)
+        )
+        return json.loads(workflow_body_json)
 
     def get_eval_model(self, fallback: str = "") -> str:
         return self._prompt_variant.get_string("evalModel", fallback)

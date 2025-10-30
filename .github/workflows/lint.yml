@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -24,20 +24,10 @@ jobs:
           pip install --upgrade pylint
           pip install --upgrade mypy
           pip install --upgrade -r requirements.txt
-          pip install --upgrade .[test]
 
       - name: Run Linter
         run: pylint ./statsig_ai --rcfile .pylintrc
 
       - name: Run Type Checker
         run: |
-          pip install types-requests
-          pip install types-redis
-          pip install types-protobuf
           mypy ./statsig_ai --check-untyped-defs
-
-      # - name: Run Tests
-      #   run: python3 -m unittest discover -s ./tests --verbose
-      #   env:
-      #     test_api_key: ${{ secrets.SDK_CONSISTENCY_TEST_COMPANY_API_KEY }}
-      #     test_client_key: ${{ secrets.KONG_CLIENT_SDK_KEY }}
