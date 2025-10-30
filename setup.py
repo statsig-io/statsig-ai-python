@@ -23,7 +23,7 @@ setup(
     name="statsig_ai",
     # pylint: disable=undefined-variable
     version=__version__,  # type: ignore
-    description="Statsig Python Server SDK",
+    description="Statsig AI Python SDK",
     long_description=README,
     long_description_content_type="text/markdown",
     author="",
