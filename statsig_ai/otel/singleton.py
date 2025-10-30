@@ -1,5 +1,5 @@
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.trace import TracerProvider
 
 
 class OtelSingleton:
@@ -27,10 +27,6 @@ class OtelSingleton:
         if cls._instance is not None:
             return cls._instance
         return NoopOtelSingleton.get_instance()
-
-    @classmethod
-    def __reset(cls):
-        cls._instance = None
 
     def get_tracer_provider(self) -> TracerProvider:
         return self._tracer_provider
