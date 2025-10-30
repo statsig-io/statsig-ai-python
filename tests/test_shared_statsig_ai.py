@@ -89,9 +89,8 @@ def test_getting_shared_instance_with_attach_config(statsig_setup):
 def test_removing_shared_instance_with_attach_config(statsig_setup):
     statsig_options, _ = statsig_setup
     statsig = Statsig(sdk_key="secret-key", options=statsig_options)
-    StatsigAI.new_shared(statsig_source=StatsigAttachConfig(sdk_key="secret-key", statsig=statsig))
-    shared_statsig_ai = StatsigAI.shared()
     statsig.initialize().wait()
-    shared_statsig_ai.initialize()
+    StatsigAI.new_shared(statsig_source=StatsigAttachConfig(sdk_key="secret-key", statsig=statsig))
+    StatsigAI.shared().initialize()
     StatsigAI.remove_shared()
-    assert not shared_statsig_ai.get_statsig().check_gate(StatsigUser("my_user"), "test_public")
+    assert not StatsigAI.shared().get_statsig().check_gate(StatsigUser("my_user"), "test_public")
