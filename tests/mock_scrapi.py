@@ -29,9 +29,7 @@ class MockScrapi:
 
             return Response(response, status=status)
 
-        self.httpserver.expect_request(endpoint, method=method).respond_with_handler(
-            handler
-        )
+        self.httpserver.expect_request(endpoint, method=method).respond_with_handler(handler)
 
     def url_for_endpoint(self, endpoint):
         return self.httpserver.url_for(endpoint)

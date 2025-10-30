@@ -1,4 +1,4 @@
-from typing import Any, Never, Optional, TypedDict, Union, overload
+from typing import Any, Optional, Union
 
 from statsig_python_core import Statsig, StatsigOptions
 from .prompt import make_prompt, PromptEvaluationOptions
@@ -7,13 +7,13 @@ from .statsig_ai_options import StatsigAIOptions
 from .prompt_version import PromptVersion
 
 
-class StatsigCreateConfig():
+class StatsigCreateConfig:
     def __init__(self, sdk_key: str, statsig_options: Optional[StatsigOptions] = None):
         self.sdk_key = sdk_key
         self.statsig_options = statsig_options
 
 
-class StatsigAttachConfig():
+class StatsigAttachConfig:
     def __init__(self, sdk_key: str, statsig: Statsig):
         self.sdk_key = sdk_key
         self.statsig = statsig
@@ -71,25 +71,26 @@ class StatsigAIInstance:
         MAX_DEPTH = 300
         depth = 0
 
-        base_param_store_name = f"prompt_{prompt_name}"
+        base_param_store_name = f"prompt:{prompt_name}"
         current_param_store_name = base_param_store_name
         next_param_store_name = self._statsig.get_parameter_store(
             user, current_param_store_name
         ).get_string("prompt_targeting_rules", "")
 
-        while depth < MAX_DEPTH:
-            next_param_store = self._statsig.get_parameter_store(
-                user, next_param_store_name
-            )
-            possible_next_param_store_names = next_param_store.get_string(
+        while (
+            next_param_store_name != ""
+            and next_param_store_name != current_param_store_name
+            and depth < MAX_DEPTH
+        ):
+            next_param_store = self._statsig.get_parameter_store(user, next_param_store_name)
+            possible_next_param_store_name = next_param_store.get_string(
                 "prompt_targeting_rules", ""
             )
-            if possible_next_param_store_names in [next_param_store_name, ""]:
+            if possible_next_param_store_name in [next_param_store_name, ""]:
                 current_param_store_name = next_param_store_name
                 break
             current_param_store_name = next_param_store_name
-            next_param_store_name = possible_next_param_store_names
-
+            next_param_store_name = possible_next_param_store_name
             depth += 1
 
         if depth >= MAX_DEPTH:
@@ -98,9 +99,7 @@ class StatsigAIInstance:
                 f"[Statsig] Max targeting depth ({MAX_DEPTH}) reached while resolving prompt: {prompt_name}. "
                 + f'Possible circular reference starting from "{base_param_store_name}".'
             )
-        final_param_store = self._statsig.get_parameter_store(
-            user, current_param_store_name
-        )
+        final_param_store = self._statsig.get_parameter_store(user, current_param_store_name)
         prompt_name = current_param_store_name.split(":")[1]
 
         return make_prompt(self._statsig, prompt_name, final_param_store, user)
@@ -134,12 +133,5 @@ class StatsigAIInstance:
             },
         )
 
-    def _set_up_otel(
-        self, _sdk_key: str, options: Optional[StatsigAIOptions] = None
-    ) -> None:
-        if (
-            options is None
-            or options.enable_default_otel is None
-            or not options.enable_default_otel
-        ):
-            return
+    def _set_up_otel(self, _sdk_key: str, options: Optional[StatsigAIOptions] = None) -> None:
+        pass

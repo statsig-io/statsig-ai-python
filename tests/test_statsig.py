@@ -1,6 +1,8 @@
-from statsig_python_core import Statsig, StatsigOptions, StatsigUser
+from statsig_python_core import StatsigOptions, StatsigUser
 from pytest_httpserver import HTTPServer
 import json
+from statsig_ai import PromptVersion, StatsigAI
+from statsig_ai.statsig_ai_base import StatsigCreateConfig
 from utils import get_test_data_resource
 import pytest
 
@@ -10,9 +12,9 @@ def statsig_setup(httpserver: HTTPServer):
     dcs_content = get_test_data_resource("eval_proj_dcs.json")
     json_data = json.loads(dcs_content)
 
-    httpserver.expect_request(
-        "/v2/download_config_specs/secret-key.json"
-    ).respond_with_json(json_data)
+    httpserver.expect_request("/v2/download_config_specs/secret-key.json").respond_with_json(
+        json_data
+    )
 
     httpserver.expect_request("/v1/log_event").respond_with_json({"success": True})
 
@@ -20,83 +22,62 @@ def statsig_setup(httpserver: HTTPServer):
         specs_url=httpserver.url_for("/v2/download_config_specs"),
         log_event_url=httpserver.url_for("/v1/log_event"),
     )
-    statsig = Statsig("secret-key", options)
 
-    statsig.initialize().wait()
-
-    yield statsig
-
-    # Teardown
-    statsig.shutdown().wait()
+    yield options
 
 
-def test_check_gate(statsig_setup):
-    statsig = statsig_setup
-
-    assert statsig.check_gate(StatsigUser("a-user"), "test_public")
-
-
-def test_get_feature_gate(statsig_setup):
-    statsig = statsig_setup
-    gate = statsig.get_feature_gate(StatsigUser("a-user"), "test_public")
-
-    assert gate.value
-    assert gate.name == "test_public"
-    assert gate.rule_id == "6X3qJgyfwA81IJ2dxI7lYp"
-    assert gate.id_type == "userID"
-    assert gate.details.reason == "Network:Recognized"
-    assert isinstance(gate.details.lcut, int)
-    assert isinstance(gate.details.received_at, int)
-
-
-def test_get_dynamic_config(statsig_setup):
-    statsig = statsig_setup
-    config = statsig.get_dynamic_config(StatsigUser("my_user"), "big_number")
-
-    assert config.get_float("foo", 1) == 1e21
-    assert config.get_integer("rar", 1) == 9999999999
-    assert config.name == "big_number"
-    assert config.rule_id == "default"
-    assert config.id_type == "userID"
-    assert config.details.reason == "Network:Recognized"
-    assert isinstance(config.details.lcut, int)
-    assert isinstance(config.details.received_at, int)
-
-
-def test_get_experiment(statsig_setup):
-    statsig = statsig_setup
-    experiment = statsig.get_experiment(
-        StatsigUser("my_user"), "experiment_with_many_params"
+def test_get_prompt(statsig_setup):
+    options = statsig_setup
+    statsig_ai = StatsigAI(
+        statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
     )
-
-    assert experiment.get_string("a_string", "ERR") == "test_2"
-    assert experiment.name == "experiment_with_many_params"
-    assert experiment.rule_id == "7kGqFczL8Ztc2vv3tWGmvO"
-    assert experiment.id_type == "userID"
-    assert experiment.group_name == "Test #2"
-    assert experiment.details.reason == "Network:Recognized"
-    assert isinstance(experiment.details.lcut, int)
-    assert isinstance(experiment.details.received_at, int)
+    statsig_ai.initialize()
+    prompt = statsig_ai.get_prompt(StatsigUser("a-user"), "test_prompt")
+    statsig_ai.shutdown()
+    assert prompt.get_name() == "test_prompt"
+    assert isinstance(prompt.get_live(), PromptVersion)
+    assert isinstance(prompt.get_candicates(), list)
+    assert all(isinstance(c, PromptVersion) for c in prompt.get_candicates())
 
 
-def test_get_layer(statsig_setup):
-    statsig = statsig_setup
-    layer = statsig.get_layer(StatsigUser("my_user"), "layer_with_many_params")
+def test_get_prompt_get_live(statsig_setup):
+    options = statsig_setup
+    statsig_ai = StatsigAI(
+        statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
+    )
+    statsig_ai.initialize()
+    prompt = statsig_ai.get_prompt(StatsigUser("a-user"), "test_prompt")
+    statsig_ai.shutdown()
 
-    assert layer.get_string("a_string", "ERR") == "test_2"
-    assert layer.name == "layer_with_many_params"
-    assert layer.rule_id == "7kGqFczL8Ztc2vv3tWGmvO"
-    assert layer.details.reason == "Network:Recognized"
-    assert isinstance(layer.details.lcut, int)
-    assert isinstance(layer.details.received_at, int)
+    live_version = prompt.get_live()
+    assert live_version is not None
+    assert live_version.get_id() == "6KGzeo8TR9JTL7CZl7vccd"
+    assert live_version.get_name() == "Version 1"
+    assert live_version.get_temperature() == 1
+    assert live_version.get_max_tokens() == 1000
+    assert live_version.get_top_p() == 1
+    assert live_version.get_frequency_penalty() == 0
+    assert live_version.get_presence_penalty() == 0
+    assert live_version.get_provider() == "openai"
+    assert live_version.get_model() == "gpt-5"
+    assert isinstance(live_version.get_workflow_body(), dict)
+    assert live_version.get_eval_model() == "gpt-4o-mini"
+    assert live_version.get_type() == "Live"
+    assert live_version.get_prompt_name() == "test_prompt"
 
 
-def test_gcir(statsig_setup):
-    statsig = statsig_setup
+def test_get_prompt_get_candicates(statsig_setup):
+    options = statsig_setup
+    statsig_ai = StatsigAI(
+        statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
+    )
+    statsig_ai.initialize()
+    prompt = statsig_ai.get_prompt(StatsigUser("a-user"), "test_prompt")
+    statsig_ai.shutdown()
 
-    response_data = statsig.get_client_initialize_response(StatsigUser("my_user"))
-    response = json.loads(response_data)
-
-    assert len(response["feature_gates"]) > 0
-    assert len(response["dynamic_configs"]) > 0
-    assert len(response["layer_configs"]) > 0
+    candicates = prompt.get_candicates()
+    assert len(candicates) == 2
+    assert candicates[0].get_id() == "7jszgFEAi1KRA2Tot6qikg"
+    assert candicates[0].get_name() == "Version 2"
+    assert candicates[1].get_id() == "7CKLvQvOwjj2vjx12gFO0Z"
+    assert candicates[1].get_name() == "Version 3"

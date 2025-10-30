@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any, Dict, List, Optional, TypedDict
 from statsig_python_core import DynamicConfig
@@ -13,31 +14,26 @@ class PromptMessage(TypedDict):
 
 class PromptVersion:
     def __init__(self, prompt_variant: DynamicConfig):
-        self.name: str = prompt_variant.get_value("name", "")
-        self._type: str = prompt_variant.get_value("type", "")
-        self._ai_config_name: str = prompt_variant.get_value("aiConfigName", "")
+        self.name: str = prompt_variant.get_string("name", "")
+        self._type: str = prompt_variant.get_string("type", "")
+        self._ai_config_name: str = prompt_variant.get_string("aiConfigName", "")
 
         parts = prompt_variant.name.split(":")
         self._id: str = parts[1] if len(parts) > 1 else ""
 
         self._prompt_variant = prompt_variant
-        self._temperature: Optional[float] = prompt_variant.get_value(
-            "temperature", None
+        self._temperature: Optional[float] = prompt_variant.get_float("temperature", 0)
+        self._max_tokens: Optional[int] = prompt_variant.get_integer("maxTokens", 0)
+        self._top_p: Optional[float] = prompt_variant.get_float("topP", 0)
+        self._frequency_penalty: Optional[float] = prompt_variant.get_float("frequencyPenalty", 0)
+        self._presence_penalty: Optional[float] = prompt_variant.get_float("presencePenalty", 0)
+        self._provider: Optional[str] = prompt_variant.get_string("provider", "")
+        self._model: Optional[str] = prompt_variant.get_string("model", "")
+        workflow_body_json: Optional[Dict[str, Any]] = prompt_variant.get_object_json(
+            "workflowBody", "{}"
         )
-        self._max_tokens: Optional[int] = prompt_variant.get_value("maxTokens", None)
-        self._top_p: Optional[float] = prompt_variant.get_value("topP", None)
-        self._frequency_penalty: Optional[float] = prompt_variant.get_value(
-            "frequencyPenalty", None
-        )
-        self._presence_penalty: Optional[float] = prompt_variant.get_value(
-            "presencePenalty", None
-        )
-        self._provider: Optional[str] = prompt_variant.get_value("provider", None)
-        self._model: Optional[str] = prompt_variant.get_value("model", None)
-        self._workflow_body: Optional[Dict[str, Any]] = prompt_variant.get_value(
-            "workflowBody", None
-        )
-        self._eval_model: Optional[str] = prompt_variant.get_value("evalModel", None)
+        self._workflow_body: Optional[Dict[str, Any]] = json.loads(workflow_body_json)
+        self._eval_model: Optional[str] = prompt_variant.get_string("evalModel", "")
 
     def get_name(self) -> str:
         return self.name
@@ -61,14 +57,10 @@ class PromptVersion:
         return self._top_p if self._top_p is not None else fallback
 
     def get_frequency_penalty(self, fallback: Optional[float] = 0) -> float:
-        return (
-            self._frequency_penalty if self._frequency_penalty is not None else fallback
-        )
+        return self._frequency_penalty if self._frequency_penalty is not None else fallback
 
     def get_presence_penalty(self, fallback: Optional[float] = 0) -> float:
-        return (
-            self._presence_penalty if self._presence_penalty is not None else fallback
-        )
+        return self._presence_penalty if self._presence_penalty is not None else fallback
 
     def get_provider(self, fallback: str = "") -> str:
         return self._provider if self._provider is not None else fallback
@@ -76,12 +68,8 @@ class PromptVersion:
     def get_model(self, fallback: str = "") -> str:
         return self._model if self._model is not None else fallback
 
-    def get_workflow_body(
-        self, fallback: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        return (
-            self._workflow_body if self._workflow_body is not None else (fallback or {})
-        )
+    def get_workflow_body(self, fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self._workflow_body if self._workflow_body is not None else (fallback or {})
 
     def get_eval_model(self, fallback: str = "") -> str:
         return self._eval_model if self._eval_model is not None else fallback
@@ -90,9 +78,7 @@ class PromptVersion:
         return self._prompt_variant.get_value(key, fallback)
 
     def get_prompt_messages(self, params: PromptParams) -> List[PromptMessage]:
-        prompts = self._prompt_variant.get_value(
-            "prompts", [{"role": "system", "content": ""}]
-        )
+        prompts = self._prompt_variant.get_value("prompts", [{"role": "system", "content": ""}])
         regex = re.compile(r"{{\s*([^}]+)\s*}}")
 
         def replace_placeholders(content: str) -> str:
@@ -103,10 +89,7 @@ class PromptVersion:
 
             return regex.sub(replacer, content)
 
-        return [
-            PromptMessage(p["role"], replace_placeholders(p["content"]))
-            for p in prompts
-        ]
+        return [PromptMessage(p["role"], replace_placeholders(p["content"])) for p in prompts]
 
 
 def resolve_path(obj: Any, path: str) -> Any:

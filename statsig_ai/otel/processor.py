@@ -8,5 +8,3 @@ class StatsigSpanProcessor(BatchSpanProcessor):
     Currently identical to BatchSpanProcessor, but provides a named subclass
     for future customization.
     """
-
-    pass

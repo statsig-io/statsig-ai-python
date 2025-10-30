@@ -26,9 +26,7 @@ class InitializeOptions:
     ):
         self.global_context_manager = global_context_manager
         self.skip_global_context_manager_setup = skip_global_context_manager_setup
-        self.enable_global_trace_provider_registration = (
-            enable_global_trace_provider_registration
-        )
+        self.enable_global_trace_provider_registration = enable_global_trace_provider_registration
         self.global_trace_provider = global_trace_provider
         self.exporter_options = exporter_options or {}
         self.service_name = service_name
@@ -40,10 +38,7 @@ def initialize_otel(options: Optional[InitializeOptions] = None):
     options = options or InitializeOptions()
 
     # --- Context Manager Setup ---
-    if (
-        not options.global_context_manager
-        and not options.skip_global_context_manager_setup
-    ):
+    if not options.global_context_manager and not options.skip_global_context_manager_setup:
         try:
             # In Python, the default context manager is thread-local.
             # For async frameworks, additional libraries (e.g., asyncio contextvars) can be used.

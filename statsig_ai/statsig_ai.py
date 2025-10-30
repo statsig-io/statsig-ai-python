@@ -1,4 +1,4 @@
-from typing import Optional, Union, overload
+from typing import Optional, Union
 from .statsig_ai_base import StatsigAIInstance
 from .statsig_ai_options import StatsigAIOptions
 from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig
@@ -27,7 +27,9 @@ class StatsigAI(StatsigAIInstance):
                 "Call StatsigAI.remove_shared() before creating a new instance."
             )
 
-        cls._statsig_ai_shared_instance = StatsigAIInstance(statsig_source=statsig_source, ai_options=ai_options)
+        cls._statsig_ai_shared_instance = StatsigAIInstance(
+            statsig_source=statsig_source, ai_options=ai_options
+        )
         return cls._statsig_ai_shared_instance
 
     @classmethod
@@ -39,7 +41,9 @@ class StatsigAI(StatsigAIInstance):
         return cls._statsig_ai_shared_instance is not None
 
 
-
 def create_statsig_ai_error_instance(message: str) -> StatsigAIInstance:
     print("Error: ", message)
-    return StatsigAIInstance(statsig_source=StatsigCreateConfig(sdk_key="__STATSIG_ERROR_SDK_KEY__"), ai_options=None)
+    return StatsigAIInstance(
+        statsig_source=StatsigCreateConfig(sdk_key="__STATSIG_ERROR_SDK_KEY__"),
+        ai_options=None,
+    )
