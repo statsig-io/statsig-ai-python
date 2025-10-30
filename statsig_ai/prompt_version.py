@@ -56,7 +56,8 @@ class PromptVersion:
     def get_model(self, fallback: str = "") -> str:
         return self._prompt_variant.get_string("model", fallback)
 
-    def get_workflow_body(self, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    # pylint: disable=dangerous-default-value
+    def get_workflow_body(self, fallback: Dict[str, Any] = {}) -> Dict[str, Any]:
         workflow_body_json = self._prompt_variant.get_object_json(
             "workflowBody", json.dumps(fallback)
         )
@@ -65,16 +66,16 @@ class PromptVersion:
     def get_eval_model(self, fallback: str = "") -> str:
         return self._prompt_variant.get_string("evalModel", fallback)
 
-    def get_string(self, key: str, fallback: str = "") -> str:
+    def get_string(self, key: str, fallback: str) -> str:
         return self._prompt_variant.get_string(key, fallback)
 
-    def get_integer(self, key: str, fallback: int = 0) -> int:
+    def get_integer(self, key: str, fallback: int) -> int:
         return self._prompt_variant.get_integer(key, fallback)
 
-    def get_float(self, key: str, fallback: float = 0) -> float:
+    def get_float(self, key: str, fallback: float) -> float:
         return self._prompt_variant.get_float(key, fallback)
 
-    def get_boolean(self, key: str, fallback: bool = False) -> bool:
+    def get_boolean(self, key: str, fallback: bool) -> bool:
         return self._prompt_variant.get_bool(key, fallback)
 
     def get_array(self, key: str, fallback: list) -> list:
