@@ -46,6 +46,6 @@ setup(
     tests_require=test_deps,
     extras_require=extras,
     include_package_data=True,
-    packages=find_packages(include=["statsig_ai"]),
+    packages=find_packages(include=["statsig_ai", "statsig_ai.*"]),
     python_requires=">=3.9",
 )
