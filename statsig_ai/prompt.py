@@ -1,5 +1,5 @@
 from typing import List, TypedDict
-from statsig_python_core import Statsig, StatsigUser, ParameterStore
+from statsig_python_core import Statsig, StatsigUser
 from .prompt_version import PromptVersion
 
 
@@ -23,9 +23,7 @@ class Prompt:
         return self.candicates
 
 
-def make_prompt(
-    statsig: Statsig, name: str, paramStore: ParameterStore, user: StatsigUser
-) -> Prompt:
+def make_prompt(statsig: Statsig, name: str, paramStore, user: StatsigUser) -> Prompt:
     live_config_id = paramStore.get_string("live", "") or ""
     candidates_config_ids = paramStore.get_array("candidates", []) or []
     live_config = statsig.get_dynamic_config(user, live_config_id)
