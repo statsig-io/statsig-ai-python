@@ -3,7 +3,7 @@ import os
 from setuptools import setup, find_packages
 
 with open(
-    os.path.join(os.path.abspath(os.path.dirname(__file__)), "statsig-ai", "version.py"),
+    os.path.join(os.path.abspath(os.path.dirname(__file__)), "statsig_ai", "version.py"),
     encoding="utf-8",
 ) as f:
     exec(f.read())
@@ -14,13 +14,13 @@ with open(
 ) as r:
     README = r.read()
 
-test_deps = ["requests", "user_agents", "semver"]
+test_deps = ["pytest", "pytest-httpserver", "werkzeug", "statsig-python-core"]
 extras = {
     "test": test_deps,
 }
 
 setup(
-    name="statsig-ai",
+    name="statsig_ai",
     # pylint: disable=undefined-variable
     version=__version__,  # type: ignore
     description="Statsig Python Server SDK",
@@ -38,12 +38,14 @@ setup(
     ],
     install_requires=[
         "statsig-python-core",
+        "opentelemetry-api>=1.27.0",
+        "opentelemetry-sdk>=1.27.0",
+        "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+        "opentelemetry-semantic-conventions>=0.48b0",
     ],
     tests_require=test_deps,
     extras_require=extras,
     include_package_data=True,
-    packages=find_packages(
-        include=["statsig-ai"]
-    ),
+    packages=find_packages(include=["statsig_ai", "statsig_ai.*"]),
     python_requires=">=3.9",
 )
