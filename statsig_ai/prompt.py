@@ -1,7 +1,6 @@
 from typing import List, TypedDict
-from statsig_python_core import Statsig, StatsigUser
+from statsig_python_core import Statsig, StatsigUser, ParameterStore
 from .prompt_version import PromptVersion
-from statsig_python_core import ParameterStore
 
 
 class PromptEvaluationOptions(TypedDict):
@@ -27,8 +26,8 @@ class Prompt:
 def make_prompt(
     statsig: Statsig, name: str, paramStore: ParameterStore, user: StatsigUser
 ) -> Prompt:
-    live_config_id = paramStore.get_string("live", "")
-    candidates_config_ids = paramStore.get_array("candidates", [])
+    live_config_id = paramStore.get_string("live", "") or ""
+    candidates_config_ids = paramStore.get_array("candidates", []) or []
     live_config = statsig.get_dynamic_config(user, live_config_id)
     candidates_configs = []
     for config_id in candidates_config_ids:

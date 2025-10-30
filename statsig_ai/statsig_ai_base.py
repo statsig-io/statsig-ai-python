@@ -73,9 +73,12 @@ class StatsigAIInstance:
 
         base_param_store_name = f"prompt:{prompt_name}"
         current_param_store_name = base_param_store_name
-        next_param_store_name = self._statsig.get_parameter_store(
-            user, current_param_store_name
-        ).get_string("prompt_targeting_rules", "")
+        next_param_store_name = (
+            self._statsig.get_parameter_store(user, current_param_store_name).get_string(
+                "prompt_targeting_rules", ""
+            )
+            or ""
+        )
 
         while (
             next_param_store_name != ""
@@ -83,8 +86,8 @@ class StatsigAIInstance:
             and depth < MAX_DEPTH
         ):
             next_param_store = self._statsig.get_parameter_store(user, next_param_store_name)
-            possible_next_param_store_name = next_param_store.get_string(
-                "prompt_targeting_rules", ""
+            possible_next_param_store_name = (
+                next_param_store.get_string("prompt_targeting_rules", "") or ""
             )
             if possible_next_param_store_name in [next_param_store_name, ""]:
                 current_param_store_name = next_param_store_name
