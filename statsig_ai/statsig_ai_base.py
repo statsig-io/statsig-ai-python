@@ -49,7 +49,7 @@ class StatsigAIInstance:
 
     def flush_events(self) -> None:
         if self._owns_statsig_instance:
-            self._statsig.flush_events()
+            self._statsig.flush_events().wait()
         if self._otel is not None:
             self._otel.flush_events()
 
@@ -127,7 +127,7 @@ class StatsigAIInstance:
             "statsig::eval_result",
             prompt_version.get_prompt_name(),
             {
-                "score": score,
+                "score": str(score),
                 "session_id": session_id if session_id is not None else "",
                 "version_name": prompt_version.get_name(),
                 "version_id": prompt_version.get_id(),

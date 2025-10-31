@@ -1,33 +1,31 @@
 from statsig_python_core import StatsigOptions, StatsigUser
 from pytest_httpserver import HTTPServer
-import json
-from statsig_ai import PromptVersion, StatsigAI
-from statsig_ai.statsig_ai_base import StatsigCreateConfig
+from statsig_ai import PromptVersion, StatsigAI, StatsigCreateConfig
 from utils import get_test_data_resource
 import pytest
+from mock_scrapi import MockScrapi
 
 
 @pytest.fixture
 def statsig_setup(httpserver: HTTPServer):
+    mock_scrapi = MockScrapi(httpserver)
     dcs_content = get_test_data_resource("eval_proj_dcs.json")
-    json_data = json.loads(dcs_content)
 
-    httpserver.expect_request("/v2/download_config_specs/secret-key.json").respond_with_json(
-        json_data
+    mock_scrapi.stub(
+        "/v2/download_config_specs/secret-key.json", response=dcs_content, method="GET"
     )
-
-    httpserver.expect_request("/v1/log_event").respond_with_json({"success": True})
+    mock_scrapi.stub("/v1/log_event", response='{"success": true}', method="POST")
 
     options = StatsigOptions(
-        specs_url=httpserver.url_for("/v2/download_config_specs"),
-        log_event_url=httpserver.url_for("/v1/log_event"),
+        specs_url=mock_scrapi.url_for_endpoint("/v2/download_config_specs"),
+        log_event_url=mock_scrapi.url_for_endpoint("/v1/log_event"),
     )
 
-    yield options
+    yield options, mock_scrapi
 
 
 def test_get_prompt(statsig_setup):
-    options = statsig_setup
+    options, _ = statsig_setup
     statsig_ai = StatsigAI(
         statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
     )
@@ -41,7 +39,7 @@ def test_get_prompt(statsig_setup):
 
 
 def test_get_prompt_get_live(statsig_setup):
-    options = statsig_setup
+    options, _ = statsig_setup
     statsig_ai = StatsigAI(
         statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
     )
@@ -67,7 +65,7 @@ def test_get_prompt_get_live(statsig_setup):
 
 
 def test_get_prompt_get_candicates(statsig_setup):
-    options = statsig_setup
+    options, _ = statsig_setup
     statsig_ai = StatsigAI(
         statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
     )
@@ -81,3 +79,30 @@ def test_get_prompt_get_candicates(statsig_setup):
     assert candicates[0].get_name() == "Version 2"
     assert candicates[1].get_id() == "7CKLvQvOwjj2vjx12gFO0Z"
     assert candicates[1].get_name() == "Version 3"
+
+
+def test_log_eval_grade(statsig_setup):
+    options, mock_scrapi = statsig_setup
+    statsig_ai = StatsigAI(
+        statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
+    )
+    statsig_ai.initialize()
+    prompt_version = statsig_ai.get_prompt(StatsigUser("a-user"), "test_prompt").get_live()
+    statsig_ai.log_eval_grade(
+        StatsigUser("a-user"), prompt_version, 0.5, "test_grader", {"sessionId": "1234567890"}
+    )
+    statsig_ai.flush_events()
+
+    logged_events = mock_scrapi.get_logged_events()
+    eval_event = list(filter(lambda e: e["eventName"] == "statsig::eval_result", logged_events))
+    assert len(eval_event) == 1
+    assert eval_event[0]["eventName"] == "statsig::eval_result"
+    assert eval_event[0]["user"]["userID"] == "a-user"
+    assert eval_event[0]["value"] == "test_prompt"
+    metadata = eval_event[0]["metadata"]
+    assert metadata["score"] == "0.5"
+    assert metadata["grader_id"] == "test_grader"
+    assert metadata["ai_config_name"] == "test_prompt"
+    assert metadata["version_name"] == "Version 1"
+    assert metadata["version_id"] == "6KGzeo8TR9JTL7CZl7vccd"
+    assert metadata["session_id"] == "1234567890"

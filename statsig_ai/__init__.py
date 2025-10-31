@@ -10,6 +10,7 @@ from .otel import (
     StatsigOTLPTraceExporter,
 )
 from .statsig_ai import StatsigAI
+from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig
 
 __all__ = [
     "StatsigAIOptions",
@@ -22,6 +23,8 @@ __all__ = [
     "StatsigSpanProcessor",
     "StatsigOTLPTraceExporter",
     "StatsigAI",
+    "StatsigCreateConfig",
+    "StatsigAttachConfig",
     # Re-export from statsig-python-core for convenience
     "Statsig",
     "StatsigOptions",
