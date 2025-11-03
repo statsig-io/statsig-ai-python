@@ -3,7 +3,6 @@ from typing import Any, Optional, Union
 from statsig_python_core import Statsig, StatsigOptions
 from .prompt import make_prompt, PromptEvaluationOptions
 from .ai_eval_grade_data import AIEvalGradeData
-from .statsig_ai_options import StatsigAIOptions
 from .prompt_version import PromptVersion
 
 
@@ -14,8 +13,7 @@ class StatsigCreateConfig:
 
 
 class StatsigAttachConfig:
-    def __init__(self, sdk_key: str, statsig: Statsig):
-        self.sdk_key = sdk_key
+    def __init__(self, statsig: Statsig):
         self.statsig = statsig
 
 
@@ -23,41 +21,31 @@ StatsigSourceConfig = Union[StatsigCreateConfig, StatsigAttachConfig]
 
 
 class StatsigAIInstance:
-    _otel: Optional[Any] = None
     _statsig: Statsig
     _owns_statsig_instance: bool
 
     def __init__(
         self,
         statsig_source: StatsigSourceConfig,
-        ai_options: Optional[StatsigAIOptions] = None,
     ):
         if isinstance(statsig_source, StatsigAttachConfig):
             self._statsig = statsig_source.statsig
             self._owns_statsig_instance = False
-            self._set_up_otel(statsig_source.sdk_key, ai_options)
         else:
             self._statsig = Statsig(statsig_source.sdk_key, statsig_source.statsig_options)
             self._owns_statsig_instance = True
-            self._set_up_otel(statsig_source.sdk_key, ai_options)
 
     def initialize(self) -> None:
         if self._owns_statsig_instance:
             self._statsig.initialize().wait()
-        if self._otel is not None:
-            self._otel.initialize()
 
     def flush_events(self) -> None:
         if self._owns_statsig_instance:
             self._statsig.flush_events().wait()
-        if self._otel is not None:
-            self._otel.flush_events()
 
     def shutdown(self) -> None:
         if self._owns_statsig_instance:
             self._statsig.shutdown()
-        if self._otel is not None:
-            self._otel.shutdown()
 
     def get_statsig(self) -> Statsig:
         return self._statsig
@@ -121,20 +109,16 @@ class StatsigAIInstance:
             )
             return
 
-        session_id = eval_data.get("sessionId", None)
         self._statsig.log_event(
             user,
             "statsig::eval_result",
             prompt_version.get_prompt_name(),
             {
                 "score": str(score),
-                "session_id": session_id if session_id is not None else "",
+                "session_id": eval_data.session_id or "",
                 "version_name": prompt_version.get_name(),
                 "version_id": prompt_version.get_id(),
                 "grader_id": grader_name,
                 "ai_config_name": prompt_version.get_prompt_name(),
             },
         )
-
-    def _set_up_otel(self, _sdk_key: str, options: Optional[StatsigAIOptions] = None) -> None:
-        pass

@@ -1,5 +1,6 @@
 import os
-from typing import Optional, Dict
+from typing import Optional, Dict, TypedDict
+from dataclasses import dataclass
 
 from opentelemetry import trace, context
 from opentelemetry.context.context import Context
@@ -7,19 +8,19 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.sdk.resources import Resource
 
-from .exporter import StatsigOTLPTraceExporter
+from .exporter import StatsigOTLPTraceExporter, StatsigOTLPTraceExporterOptions
 from .processor import StatsigSpanProcessor
 from .singleton import OtelSingleton
 
 
-class InitializeOptions:
+class InitializeTracingOptions:
     def __init__(
         self,
         global_context_manager: Optional[Context] = None,
         skip_global_context_manager_setup: bool = False,
         enable_global_trace_provider_registration: bool = False,
         global_trace_provider: Optional[TracerProvider] = None,
-        exporter_options: Optional[Dict[str, str]] = None,
+        exporter_options: Optional[StatsigOTLPTraceExporterOptions] = None,
         service_name: Optional[str] = None,
         version: Optional[str] = None,
         environment: Optional[str] = None,
@@ -28,20 +29,26 @@ class InitializeOptions:
         self.skip_global_context_manager_setup = skip_global_context_manager_setup
         self.enable_global_trace_provider_registration = enable_global_trace_provider_registration
         self.global_trace_provider = global_trace_provider
-        self.exporter_options = exporter_options or {}
+        self.exporter_options = exporter_options or StatsigOTLPTraceExporterOptions()
         self.service_name = service_name
         self.version = version
         self.environment = environment
 
 
-def initialize_otel(options: Optional[InitializeOptions] = None):
-    options = options or InitializeOptions()
+@dataclass
+class InitializeTracingResult:
+    exporter: StatsigOTLPTraceExporter
+    processor: StatsigSpanProcessor
+    provider: TracerProvider
 
-    # --- Context Manager Setup ---
+
+def initialize_tracing(
+    options: Optional[InitializeTracingOptions] = None,
+) -> InitializeTracingResult:
+    options = options or InitializeTracingOptions()
+
     if not options.global_context_manager and not options.skip_global_context_manager_setup:
         try:
-            # In Python, the default context manager is thread-local.
-            # For async frameworks, additional libraries (e.g., asyncio contextvars) can be used.
             context.attach(context.get_current())
         except Exception:
             print(
@@ -50,7 +57,6 @@ def initialize_otel(options: Optional[InitializeOptions] = None):
                 "You can skip this setup by passing skip_global_context_manager_setup=True."
             )
 
-    # --- Create trace components ---
     trace_components = _create_trace_components(
         exporter_options=options.exporter_options,
         resources={
@@ -60,12 +66,10 @@ def initialize_otel(options: Optional[InitializeOptions] = None):
         },
     )
 
-    tracer_provider = options.global_trace_provider or trace_components["provider"]
+    tracer_provider = options.global_trace_provider or trace_components.provider
 
-    # --- Singleton setup ---
     OtelSingleton.instantiate(tracer_provider)
 
-    # --- Register provider globally ---
     if options.enable_global_trace_provider_registration:
         trace.set_tracer_provider(tracer_provider)
 
@@ -73,12 +77,11 @@ def initialize_otel(options: Optional[InitializeOptions] = None):
 
 
 def _create_trace_components(
-    exporter_options: Dict[str, str],
+    exporter_options: StatsigOTLPTraceExporterOptions,
     resources: Dict[str, Optional[str]],
-):
+) -> InitializeTracingResult:
     exporter = StatsigOTLPTraceExporter(
-        sdk_key=exporter_options.get("sdkKey"),
-        dsn=exporter_options.get("dsn"),
+        options=exporter_options,
     )
 
     processor = StatsigSpanProcessor(exporter)
@@ -91,8 +94,8 @@ def _create_trace_components(
     )
     provider.add_span_processor(processor)
 
-    return {
-        "exporter": exporter,
-        "processor": processor,
-        "provider": provider,
-    }
+    return InitializeTracingResult(
+        exporter=exporter,
+        processor=processor,
+        provider=provider,
+    )

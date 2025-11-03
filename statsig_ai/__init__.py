@@ -1,32 +1,33 @@
 from statsig_python_core import Statsig, StatsigOptions, StatsigUser
-from .statsig_ai_options import StatsigAIOptions
 from .prompt import PromptEvaluationOptions, Prompt
 from .ai_eval_grade_data import AIEvalGradeData
 from .prompt_version import PromptVersion
 from .otel import (
-    initialize_otel,
+    initialize_tracing,
+    InitializeTracingOptions,
     OtelSingleton,
     StatsigSpanProcessor,
     StatsigOTLPTraceExporter,
+    StatsigOTLPTraceExporterOptions,
 )
 from .statsig_ai import StatsigAI
 from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig
 
 __all__ = [
-    "StatsigAIOptions",
-    "Prompt",
-    "PromptEvaluationOptions",
-    "AIEvalGradeData",
-    "PromptVersion",
-    "initialize_otel",
-    "OtelSingleton",
-    "StatsigSpanProcessor",
-    "StatsigOTLPTraceExporter",
     "StatsigAI",
     "StatsigCreateConfig",
     "StatsigAttachConfig",
-    # Re-export from statsig-python-core for convenience
-    "Statsig",
-    "StatsigOptions",
-    "StatsigUser",
+    # Serving
+    "Prompt",
+    "PromptVersion",
+    "PromptEvaluationOptions",
+    # Logging
+    "AIEvalGradeData",
+    # Otel/Tracing
+    "initialize_tracing",
+    "InitializeTracingOptions",
+    "OtelSingleton",
+    "StatsigSpanProcessor",
+    "StatsigOTLPTraceExporterOptions",
+    "StatsigOTLPTraceExporter",
 ]
