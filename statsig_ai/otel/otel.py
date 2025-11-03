@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Dict, TypedDict
+from typing import Optional, Dict
 from dataclasses import dataclass
 
 from opentelemetry import trace, context

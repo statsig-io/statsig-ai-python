@@ -89,7 +89,7 @@ def test_log_eval_grade(statsig_setup):
     statsig_ai.initialize()
     prompt_version = statsig_ai.get_prompt(StatsigUser("a-user"), "test_prompt").get_live()
     statsig_ai.log_eval_grade(
-        StatsigUser("a-user"), prompt_version, 0.5, "test_grader", {"sessionId": "1234567890"}
+        StatsigUser("a-user"), prompt_version, 0.5, "test_grader", {"session_id": "1234567890"}
     )
     statsig_ai.flush_events()
 

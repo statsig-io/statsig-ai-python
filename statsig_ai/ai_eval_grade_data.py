@@ -1,8 +1,7 @@
-from typing import Optional
+from typing import Optional, TypedDict
 
 from dataclasses import dataclass
 
 
-@dataclass
-class AIEvalGradeData:
+class AIEvalGradeData(TypedDict, total=False):
     session_id: Optional[str]

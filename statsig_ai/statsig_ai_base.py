@@ -115,7 +115,7 @@ class StatsigAIInstance:
             prompt_version.get_prompt_name(),
             {
                 "score": str(score),
-                "session_id": eval_data.session_id or "",
+                "session_id": eval_data.get("session_id", ""),
                 "version_name": prompt_version.get_name(),
                 "version_id": prompt_version.get_id(),
                 "grader_id": grader_name,
