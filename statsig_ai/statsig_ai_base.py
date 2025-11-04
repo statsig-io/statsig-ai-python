@@ -1,7 +1,7 @@
 from typing import Any, Optional, Union
 
 from statsig_python_core import Statsig, StatsigOptions
-from .prompt import make_prompt, PromptEvaluationOptions
+from .prompt import make_prompt, PromptEvaluationOptions, Prompt
 from .ai_eval_grade_data import AIEvalGradeData
 from .statsig_ai_options import StatsigAIOptions
 from .prompt_version import PromptVersion
@@ -67,7 +67,7 @@ class StatsigAIInstance:
         user: Any,
         prompt_name: str,
         _options: Optional[PromptEvaluationOptions] = None,
-    ) -> Any:
+    ) -> Prompt:
         MAX_DEPTH = 300
         depth = 0
 
