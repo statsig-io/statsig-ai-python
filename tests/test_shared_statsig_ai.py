@@ -1,11 +1,11 @@
-from typing import Generator, Tuple
+from typing import Tuple
 import pytest
 from mock_scrapi import MockScrapi
 from statsig_ai.statsig_ai_base import StatsigAttachConfig, StatsigCreateConfig
 from utils import get_test_data_resource
 from pytest_httpserver import HTTPServer
-from statsig_ai import StatsigAI, StatsigAIOptions
-from statsig_python_core import Statsig, StatsigOptions, StatsigUser, FeatureGate
+from statsig_ai import StatsigAI
+from statsig_python_core import Statsig, StatsigOptions, StatsigUser
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def test_removing_shared_instance_with_create_config(statsig_setup):
 def test_getting_shared_instance_with_attach_config(statsig_setup):
     statsig_options, _ = statsig_setup
     statsig = Statsig(sdk_key="secret-key", options=statsig_options)
-    StatsigAI.new_shared(statsig_source=StatsigAttachConfig(sdk_key="secret-key", statsig=statsig))
+    StatsigAI.new_shared(statsig_source=StatsigAttachConfig(statsig=statsig))
     shared_statsig_ai = StatsigAI.shared()
     # attach config do not manage the statsig instance lifecycle, so the statsig instance is not initialized
     assert not shared_statsig_ai.get_statsig().check_gate(StatsigUser("my_user"), "test_public")
@@ -90,7 +90,7 @@ def test_removing_shared_instance_with_attach_config(statsig_setup):
     statsig_options, _ = statsig_setup
     statsig = Statsig(sdk_key="secret-key", options=statsig_options)
     statsig.initialize().wait()
-    StatsigAI.new_shared(statsig_source=StatsigAttachConfig(sdk_key="secret-key", statsig=statsig))
+    StatsigAI.new_shared(statsig_source=StatsigAttachConfig(statsig=statsig))
     StatsigAI.shared().initialize()
     StatsigAI.remove_shared()
     assert not StatsigAI.shared().get_statsig().check_gate(StatsigUser("my_user"), "test_public")
