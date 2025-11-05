@@ -21,10 +21,18 @@ The AI SDK provides convenient hooks for developers working with LLMs to iterate
 	<a href="https://github.com/statsig-io/statsig-ai-node/blob/main/LICENSE">
         	<img src="https://img.shields.io/badge/license-ISC-blue.svg?colorA=1b2528&colorB=ccfbc7&style=for-the-badge">
     	</a>
-	<a href="https://www.npmjs.com/package/@statsig/statsig-ai">
-        	<img src="https://img.shields.io/npm/v/@statsig/statsig-ai.svg?colorA=1b2528&colorB=b2d3ff&style=for-the-badge">
+	<a href="https://pypi.org/project/statsig-ai/">
+        	<img src="https://img.shields.io/pypi/v/statsig-ai.svg?colorA=1b2528&colorB=b2d3ff&style=for-the-badge">
     	</a>
 	<a href="https://statsig.com/community?ref=gh_ai">
         	<img src="https://img.shields.io/badge/slack-statsig-brightgreen.svg?logo=slack&colorA=1b2528&colorB=FFF8BA&style=for-the-badge">
     	</a>
 </p>
+
+## Getting Started
+
+Read through the [Documentation](https://docs.statsig.com/ai-evals/python?ref=gh_ai) to see code samples and how to get started.
+
+## Community
+
+If you need any assistance or just have a question, feel free to reach out to us on [Slack](https://statsig.com/community?ref=gh_jsm).
