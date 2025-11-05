@@ -3,7 +3,7 @@
 > This SDK is currently in **beta**. All APIs are **experimental** and subject to change.
 > Please review the [release notes](https://github.com/statsig-io/statsig-ai-python/releases) for any **breaking changes** before upgrading.
 
-## Statsig Node AI SDK
+## Statsig Python AI SDK
 
 Statsig is the on-stop data platform for product development. We help you move faster with feature gates (feature flags), experiments, and the world's most powerful stats engine. If you're new to Statsig, check out our product and create an account at [statsig.com](https://www.statsig.com/?ref=gh_ai).
 
@@ -18,7 +18,7 @@ The AI SDK provides convenient hooks for developers working with LLMs to iterate
 </h1>
 
 <p align="center">
-	<a href="https://github.com/statsig-io/statsig-ai-node/blob/main/LICENSE">
+	<a href="https://github.com/statsig-io/statsig-ai-python/blob/main/LICENSE">
         	<img src="https://img.shields.io/badge/license-ISC-blue.svg?colorA=1b2528&colorB=ccfbc7&style=for-the-badge">
     	</a>
 	<a href="https://pypi.org/project/statsig-ai/">
