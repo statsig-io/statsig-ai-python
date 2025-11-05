@@ -1,12 +1,11 @@
-import os
-from typing import Callable, List
+from typing import List
 
 import pytest
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 
-from statsig_ai import InitializeTracingOptions, initialize_tracing
+from statsig_ai.otel.otel import InitializeTracingOptions, initialize_tracing
 
 
 @pytest.fixture(autouse=True)
