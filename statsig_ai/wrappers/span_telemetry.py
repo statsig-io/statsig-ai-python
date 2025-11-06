@@ -136,7 +136,7 @@ def safe_stringify(value: Any) -> str:
 
 def get_statsig_instance_for_logging() -> Optional[Statsig]:
     try:
-        from ..statsig_ai import StatsigAI
+        from ..statsig_ai import StatsigAI  # pylint: disable=import-outside-toplevel
 
         if hasattr(StatsigAI, "has_shared_instance") and StatsigAI.has_shared_instance():
             statsig_instance = StatsigAI.shared()

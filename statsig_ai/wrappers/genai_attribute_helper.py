@@ -5,7 +5,7 @@ from .configs import GenAICaptureOptions
 def extract_genai_attributes(
     provider_name: str,
     operation_name: str,
-    model: str,
+    model: Any,
     kwargs: Dict[str, Any],
     response: Optional[Any] = None,
 ) -> Dict[str, Any]:

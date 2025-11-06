@@ -1,4 +1,3 @@
-import time
 import logging
 from typing import Any
 from opentelemetry import trace
@@ -57,7 +56,7 @@ class ChatCompletionsWrapper(BaseWrapper):
         self._options = options.gen_ai_capture_options
 
     def create(self, *args, **kwargs):
-        model = kwargs.get("model")
+        model = str(kwargs.get("model", "unknown"))
         span_name = f"{self.operation_name} {model}"
         span = tracer.start_span(span_name, kind=SpanKind.CLIENT)
         telemetry = SpanTelemetry(span, span_name, 40_000, provider_name="openai")
