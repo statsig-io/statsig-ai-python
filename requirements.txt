@@ -7,4 +7,6 @@ opentelemetry-api
 python-dotenv
 pytest
 pytest-httpserver
+pytest-asyncio
 werkzeug
+openai

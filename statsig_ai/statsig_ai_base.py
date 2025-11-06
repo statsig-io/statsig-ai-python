@@ -45,7 +45,7 @@ class StatsigAIInstance:
 
     def shutdown(self) -> None:
         if self._owns_statsig_instance:
-            self._statsig.shutdown()
+            self._statsig.shutdown().wait()
 
     def get_statsig(self) -> Statsig:
         return self._statsig

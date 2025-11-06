@@ -14,7 +14,14 @@ with open(
 ) as r:
     README = r.read()
 
-test_deps = ["pytest", "pytest-httpserver", "werkzeug", "statsig-python-core"]
+test_deps = [
+    "pytest",
+    "pytest-httpserver",
+    "werkzeug",
+    "statsig-python-core",
+    "pytest-asyncio",
+    "openai",
+]
 extras = {
     "test": test_deps,
 }
