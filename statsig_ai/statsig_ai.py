@@ -8,7 +8,7 @@ class StatsigAI(StatsigAIInstance):
 
     @classmethod
     def shared(cls) -> StatsigAIInstance:
-        if not cls.has() or cls._statsig_ai_shared_instance is None:
+        if not cls.has_shared() or cls._statsig_ai_shared_instance is None:
             return create_statsig_ai_error_instance(
                 "StatsigAI.shared() called, but no instance has been set with StatsigAI.new_shared(...)"
             )

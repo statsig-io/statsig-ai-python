@@ -17,10 +17,6 @@ class SpanTelemetry:
         span_name: str,
         max_json_chars: int,
         provider_name: str,
-        agent_id: Optional[str] = None,
-        agent_name: Optional[str] = None,
-        agent_description: Optional[str] = None,
-        request_model: Optional[str] = None,
     ):
         self.span = span
         self.span_name = span_name
@@ -29,29 +25,19 @@ class SpanTelemetry:
         self.ended = False
 
         self.metadata["gen_ai.provider.name"] = provider_name
-        if agent_id is not None:
-            self.metadata["gen_ai.agent.id"] = agent_id
-        if agent_name is not None:
-            self.metadata["gen_ai.agent.name"] = agent_name
-        if agent_description is not None:
-            self.metadata["gen_ai.agent.description"] = agent_description
-        if request_model is not None:
-            self.metadata["gen_ai.request.model"] = request_model
-
         ctx = span.get_span_context()
-        self.metadata["span.trace_id"] = ctx.trace_id
-        self.metadata["span.span_id"] = ctx.span_id
+        self.metadata["span.trace_id"] = str(ctx.trace_id)
+        self.metadata["span.span_id"] = str(ctx.span_id)
 
     def set_operation_name(self, operation_name: str) -> None:
         self.metadata["gen_ai.operation.name"] = operation_name
-        if self.metadata.get("gen_ai.agent.name"):
-            self.span_name = f"{operation_name} {self.metadata['gen_ai.agent.name']}"
-        else:
-            self.span_name = operation_name
 
     def set_attributes(self, kv: Dict[str, Any]) -> None:
         for key, value in kv.items():
             if value is None:
+                continue
+            if isinstance(value, (list, dict)):
+                self.set_json(key, value)
                 continue
             self.span.set_attribute(key, value)
             self.metadata[key] = attribute_value_to_metadata(value)
@@ -68,11 +54,6 @@ class SpanTelemetry:
                 self.set_attributes({key: json_str})
         except Exception:
             self.set_attributes({key: "[[unserializable]]"})
-
-    def set_usage(self, usage: Optional[Dict[str, Any]]) -> None:
-        if not usage:
-            return
-        self.set_attributes(usage_attrs(usage))
 
     def set_status(self, status: Dict[str, Any]) -> None:
         code: StatusCode = status.get("code", StatusCode.UNSET)
@@ -143,14 +124,6 @@ def safe_stringify(value: Any) -> str:
         return json.dumps(value)
     except Exception:
         return str(value)
-
-
-def usage_attrs(usage: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "gen_ai.usage.input_tokens": usage.get("prompt_tokens"),
-        "gen_ai.usage.output_tokens": usage.get("completion_tokens"),
-        "gen_ai.usage.total_tokens": usage.get("total_tokens"),
-    }
 
 
 def get_statsig_instance_for_logging() -> Optional[Statsig]:
