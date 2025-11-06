@@ -77,7 +77,7 @@ def extract_opt_in_attributes(
     if gen_ai_capture_options.capture_output_messages or gen_ai_capture_options.capture_all:
         attrs["gen_ai.output.messages"] = response.get("choices", [])
     if gen_ai_capture_options.capture_system_instructions or gen_ai_capture_options.capture_all:
-        msgs = kwargs.get("messages")
+        msgs = kwargs.get("messages") or []
         system_instructions = [msg for msg in msgs if msg.get("role") == "system"]
         attrs["gen_ai.system.instructions"] = system_instructions
     if gen_ai_capture_options.capture_tool_definitions or gen_ai_capture_options.capture_all:
