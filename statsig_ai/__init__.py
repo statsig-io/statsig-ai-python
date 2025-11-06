@@ -4,7 +4,6 @@ from .ai_eval_grade_data import AIEvalGradeData
 from .prompt_version import PromptVersion
 from .statsig_ai import StatsigAI
 from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig
-from .wrappers import wrap_openai, WrapOpenAIOptions, GenAICaptureOptions
 
 __all__ = [
     "StatsigAI",
@@ -14,10 +13,6 @@ __all__ = [
     "Prompt",
     "PromptVersion",
     "PromptEvaluationOptions",
-    # Wrappers
-    "wrap_openai",
-    "WrapOpenAIOptions",
-    "GenAICaptureOptions",
     # Logging
     "AIEvalGradeData",
     # Re-export from statsig-python-core for convenience

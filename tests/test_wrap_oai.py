@@ -4,13 +4,11 @@ from pytest_httpserver import HTTPServer
 from mock_scrapi import MockScrapi
 from utils import get_test_data_resource
 from statsig_ai import (
-    GenAICaptureOptions,
-    wrap_openai,
     StatsigOptions,
     StatsigAI,
     StatsigCreateConfig,
-    WrapOpenAIOptions,
 )
+from statsig_ai.wrappers import wrap_openai, WrapOpenAIOptions, GenAICaptureOptions
 from mock_openai import MockOpenAI
 
 
