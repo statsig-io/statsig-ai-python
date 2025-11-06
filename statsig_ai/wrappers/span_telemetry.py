@@ -37,23 +37,31 @@ class SpanTelemetry:
             if value is None:
                 continue
             if isinstance(value, (list, dict)):
-                self.set_json(key, value)
+                self._set_json_safe(key, value)
                 continue
+
             self.span.set_attribute(key, value)
             self.metadata[key] = attribute_value_to_metadata(value)
 
-    def set_json(self, key: str, value: Any) -> None:
+    def _set_json_safe(self, key: str, value: Any) -> None:
         try:
             json_str = json.dumps(value if value is not None else None)
             if len(json_str) > self.max_json_chars:
                 truncated = json_str[: self.max_json_chars] + "…(truncated)"
-                self.set_attributes({key: truncated})
-                self.set_attributes({f"{key}_truncated": True})
-                self.set_attributes({f"{key}_len": len(json_str)})
+                # Directly set attributes instead of calling set_attributes again
+                self.span.set_attribute(key, truncated)
+                self.span.set_attribute(f"{key}_truncated", True)
+                self.span.set_attribute(f"{key}_len", len(json_str))
+
+                self.metadata[key] = truncated
+                self.metadata[f"{key}_truncated"] = "True"
+                self.metadata[f"{key}_len"] = str(len(json_str))
             else:
-                self.set_attributes({key: json_str})
+                self.span.set_attribute(key, json_str)
+                self.metadata[key] = json_str
         except Exception:
-            self.set_attributes({key: "[[unserializable]]"})
+            self.span.set_attribute(key, "[[unserializable]]")
+            self.metadata[key] = "[[unserializable]]"
 
     def set_status(self, status: Dict[str, Any]) -> None:
         code: StatusCode = status.get("code", StatusCode.UNSET)

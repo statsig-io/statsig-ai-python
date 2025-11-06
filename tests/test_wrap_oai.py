@@ -100,3 +100,4 @@ def test_respects_capture_options(statsig_setup):
     assert metadata["gen_ai.input.messages"] == json.dumps(
         [{"role": "user", "content": "Hello, world!"}]
     )
+    assert metadata.get("gen_ai.output.messages") is None
