@@ -25,7 +25,7 @@ def statsig_setup(httpserver: HTTPServer):
 
     yield statsig_options, mock_scrapi
 
-    if StatsigAI.has_shared():
+    if StatsigAI.has_shared_instance():
         statsig_ai = StatsigAI.shared()
         statsig_ai.shutdown()
 

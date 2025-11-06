@@ -138,7 +138,7 @@ def get_statsig_instance_for_logging() -> Optional[Statsig]:
     try:
         from ..statsig_ai import StatsigAI
 
-        if hasattr(StatsigAI, "has_shared") and StatsigAI.has_shared():
+        if hasattr(StatsigAI, "has_shared_instance") and StatsigAI.has_shared_instance():
             statsig_instance = StatsigAI.shared()
             return statsig_instance.get_statsig()
     except Exception as e:

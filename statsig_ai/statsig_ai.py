@@ -8,7 +8,7 @@ class StatsigAI(StatsigAIInstance):
 
     @classmethod
     def shared(cls) -> StatsigAIInstance:
-        if not cls.has_shared() or cls._statsig_ai_shared_instance is None:
+        if not cls.has_shared_instance() or cls._statsig_ai_shared_instance is None:
             return create_statsig_ai_error_instance(
                 "StatsigAI.shared() called, but no instance has been set with StatsigAI.new_shared(...)"
             )
@@ -19,7 +19,7 @@ class StatsigAI(StatsigAIInstance):
         cls,
         statsig_source: Union[StatsigCreateConfig, StatsigAttachConfig],
     ) -> StatsigAIInstance:
-        if cls.has_shared():
+        if cls.has_shared_instance():
             return create_statsig_ai_error_instance(
                 "StatsigAI shared instance already exists. "
                 "Call StatsigAI.remove_shared() before creating a new instance."
@@ -33,7 +33,7 @@ class StatsigAI(StatsigAIInstance):
         cls._statsig_ai_shared_instance = None
 
     @classmethod
-    def has_shared(cls) -> bool:
+    def has_shared_instance(cls) -> bool:
         return cls._statsig_ai_shared_instance is not None
 
 
