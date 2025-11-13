@@ -30,7 +30,7 @@ jobs:
 
       - name: Run Type Checker
         run: |
-          mypy ./statsig_ai --check-untyped-defs
+          mypy ./statsig_ai --install-types --non-interactive --check-untyped-defs
 
   test:
     needs: lint

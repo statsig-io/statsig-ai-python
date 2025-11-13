@@ -10,12 +10,14 @@ class MockScrapi:
         self.httpserver = httpserver
         self.requests = []
         self.logged_events = []
+        self.eval_payloads = []
         self.lock = threading.Lock()
 
     def reset(self):
         with self.lock:
             self.requests.clear()
             self.logged_events = []
+            self.eval_payloads = []
 
     def stub(self, endpoint, response="", status=200, method="GET"):
         def handler(req: Request):
@@ -26,6 +28,10 @@ class MockScrapi:
                     json_str = gzip.decompress(data)
                     req_json = json.loads(json_str)
                     self.logged_events.extend(req_json["events"])
+                elif "/evals/send_results/" in req.path:
+                    data = req.get_data()
+                    req_json = json.loads(data)
+                    self.eval_payloads.append(req_json)
 
             return Response(response, status=status)
 
@@ -60,3 +66,7 @@ class MockScrapi:
     def get_requests_for_endpoint(self, endpoint):
         with self.lock:
             return [req for req in self.requests if endpoint in req.path]
+
+    def get_eval_payloads(self):
+        with self.lock:
+            return list(self.eval_payloads)

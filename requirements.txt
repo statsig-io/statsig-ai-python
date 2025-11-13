@@ -2,7 +2,6 @@ statsig-python-core
 setuptools
 opentelemetry-exporter-otlp-proto-http
 opentelemetry-sdk
-opentelemetry-semantic-conventions
 opentelemetry-api
 python-dotenv
 pytest
@@ -10,3 +9,4 @@ pytest-httpserver
 pytest-asyncio
 werkzeug
 openai
+typing_extensions>=4.1.0
