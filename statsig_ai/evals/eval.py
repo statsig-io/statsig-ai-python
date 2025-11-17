@@ -75,6 +75,9 @@ async def _normalize_into_data_iterator(
     if inspect.isfunction(data_iterator) or inspect.isroutine(data_iterator):
         data_iterator = data_iterator()
 
+    if inspect.iscoroutine(data_iterator) or inspect.isawaitable(data_iterator):
+        data_iterator = await data_iterator
+
     if not inspect.isasyncgen(data_iterator):
         data_iterator = to_async_iter(data_iterator)
 

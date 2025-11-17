@@ -335,6 +335,38 @@ def test_eval_callable_data(eval_setup):
     assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
 
 
+def test_eval_async_callable_data(eval_setup):
+    mock_scrapi = eval_setup
+
+    async def async_data_func():
+        return [
+            {"input": "world", "expected": "Hello world"},
+            {"input": "test", "expected": "Hello test"},
+        ]
+
+    def scorer(args: EvalScorerArgs[str, str]) -> float:
+        return 1.0
+
+    result = Eval(
+        "test_async_callable_data",
+        data=async_data_func,
+        task=lambda input: f"Hello {input}",
+        scorer=scorer,
+    )
+
+    assert len(result.results) == 2
+    assert result.results[0].input == "world"
+    assert result.results[0].output == "Hello world"
+    assert result.results[0].scores["Grader"] == 1.0
+
+    payloads = mock_scrapi.get_eval_payloads()
+    assert len(payloads) == 1
+    assert len(payloads[0]["results"]) == 2
+    assert payloads[0]["results"][0]["input"] == "world"
+    assert payloads[0]["results"][0]["output"] == "Hello world"
+    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+
+
 def test_eval_async_iterator_data(eval_setup):
     mock_scrapi = eval_setup
 
