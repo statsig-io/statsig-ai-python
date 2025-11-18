@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Optional, Dict
 from dataclasses import dataclass
 
@@ -51,8 +52,8 @@ def initialize_tracing(
         try:
             context.attach(context.get_current())
         except Exception:
-            print(
-                "Could not automatically set up a global OTEL context manager.\n"
+            logging.warning(
+                "[Statsig] Could not automatically set up a global OTEL context manager.\n"
                 "This may be expected if you or another library already set one.\n"
                 "You can skip this setup by passing skip_global_context_manager_setup=True."
             )

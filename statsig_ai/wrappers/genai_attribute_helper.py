@@ -8,10 +8,12 @@ def extract_genai_attributes(
     model: Any,
     kwargs: Dict[str, Any],
     response: Optional[Any] = None,
+    otel_operation_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     attrs: Dict[str, Any] = {
         "gen_ai.provider.name": provider_name,
-        "gen_ai.operation.name": operation_name,
+        "gen_ai.operation.name": otel_operation_name if otel_operation_name else operation_name,
+        "gen_ai.operation.source_name": operation_name,
         "gen_ai.request.model": model,
     }
 

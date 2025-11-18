@@ -1,6 +1,8 @@
 from typing import Any, Dict, Optional
 import json
 import logging
+import time
+
 from opentelemetry.trace import Span, Status, StatusCode
 from statsig_python_core import Statsig, StatsigUser
 
@@ -9,28 +11,28 @@ PLACEHOLDER_STATSIG_USER = StatsigUser(user_id="statsig-ai-openai-wrapper")
 
 logger = logging.getLogger(__name__)
 
+MAX_JSON_CHARS = 40_000
+
 
 class SpanTelemetry:
     def __init__(
         self,
         span: Span,
         span_name: str,
-        max_json_chars: int,
         provider_name: str,
+        max_json_chars: int = MAX_JSON_CHARS,
     ):
         self.span = span
         self.span_name = span_name
         self.max_json_chars = max_json_chars
         self.metadata: Dict[str, str] = {}
         self.ended = False
+        self.start_time = time.time()
 
         self.metadata["gen_ai.provider.name"] = provider_name
         ctx = span.get_span_context()
         self.metadata["span.trace_id"] = str(ctx.trace_id)
         self.metadata["span.span_id"] = str(ctx.span_id)
-
-    def set_operation_name(self, operation_name: str) -> None:
-        self.metadata["gen_ai.operation.name"] = operation_name
 
     def set_attributes(self, kv: Dict[str, Any]) -> None:
         for key, value in kv.items():
@@ -40,28 +42,23 @@ class SpanTelemetry:
                 self._set_json_safe(key, value)
                 continue
 
-            self.span.set_attribute(key, value)
-            self.metadata[key] = attribute_value_to_metadata(value)
+            self._set_attribute_on_span_and_metadata(key, value)
 
     def _set_json_safe(self, key: str, value: Any) -> None:
         try:
             json_str = json.dumps(value if value is not None else None)
             if len(json_str) > self.max_json_chars:
                 truncated = json_str[: self.max_json_chars] + "…(truncated)"
-                # Directly set attributes instead of calling set_attributes again
-                self.span.set_attribute(key, truncated)
-                self.span.set_attribute(f"{key}_truncated", True)
-                self.span.set_attribute(f"{key}_len", len(json_str))
-
-                self.metadata[key] = truncated
-                self.metadata[f"{key}_truncated"] = "True"
-                self.metadata[f"{key}_len"] = str(len(json_str))
+                self._set_attribute_on_span_and_metadata(key, truncated)
+                self._set_attribute_on_span_and_metadata(f"{key}_len", len(json_str))
             else:
-                self.span.set_attribute(key, json_str)
-                self.metadata[key] = json_str
+                self._set_attribute_on_span_and_metadata(key, json_str)
         except Exception:
-            self.span.set_attribute(key, "[[unserializable]]")
-            self.metadata[key] = "[[unserializable]]"
+            self._set_attribute_on_span_and_metadata(key, "[[unserializable]]")
+
+    def _set_attribute_on_span_and_metadata(self, key: str, value: Any) -> None:
+        self.span.set_attribute(key, value)
+        self.metadata[key] = attribute_value_to_metadata(value)
 
     def set_status(self, status: Dict[str, Any]) -> None:
         code: StatusCode = status.get("code", StatusCode.UNSET)
@@ -75,15 +72,19 @@ class SpanTelemetry:
         if message:
             self.metadata["span.status_message"] = str(message)
 
+    def record_time_to_first_token(self) -> None:
+        elapsed = time.time() - self.start_time
+        self.set_attributes({"statsig.gen_ai.server.time_to_first_token_ms": elapsed * 1000})
+
     def record_exception(self, error: Any) -> None:
         self.span.record_exception(error)
         type_name = getattr(error, "__class__", None)
         if type_name:
-            self.metadata["exception.type"] = type_name.__name__
+            self._set_attribute_on_span_and_metadata("exception.type", type_name.__name__)
         if hasattr(error, "message"):
-            self.metadata["exception.message"] = str(error.message)
+            self._set_attribute_on_span_and_metadata("exception.message", str(error.message))
         elif isinstance(error, str):
-            self.metadata["exception.message"] = error
+            self._set_attribute_on_span_and_metadata("exception.message", error)
 
     def fail(self, error: Any) -> None:
         self.record_exception(error)

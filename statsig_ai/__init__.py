@@ -5,6 +5,7 @@ from .prompt_version import PromptVersion
 from .statsig_ai import StatsigAI
 from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig
 from .evals import Eval, EvalScorerArgs, EvalDataRecord, EvalHook
+from .wrappers import wrap_openai, WrapOpenAIOptions, GenAICaptureOptions
 
 __all__ = [
     "StatsigAI",
@@ -25,4 +26,8 @@ __all__ = [
     "EvalScorerArgs",
     "EvalDataRecord",
     "EvalHook",
+    # Wrappers
+    "wrap_openai",
+    "WrapOpenAIOptions",
+    "GenAICaptureOptions",
 ]

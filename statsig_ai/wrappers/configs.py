@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -11,5 +12,5 @@ class GenAICaptureOptions:
 
 
 class WrapOpenAIOptions:
-    def __init__(self, gen_ai_capture_options: GenAICaptureOptions = GenAICaptureOptions()):
-        self.gen_ai_capture_options = gen_ai_capture_options
+    def __init__(self, gen_ai_capture_options: Optional[GenAICaptureOptions] = None):
+        self.gen_ai_capture_options = gen_ai_capture_options or GenAICaptureOptions()

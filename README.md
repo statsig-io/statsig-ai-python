@@ -33,6 +33,27 @@ The AI SDK provides convenient hooks for developers working with LLMs to iterate
 
 Read through the [Documentation](https://docs.statsig.com/ai-evals/python?ref=gh_ai) to see code samples and how to get started.
 
+## Running Examples
+
+The `examples/` directory contains working examples demonstrating various features of the SDK.
+
+### Prerequisites
+
+Set up your environment variables:
+```bash
+export STATSIG_API_KEY="your-statsig-api-key"
+export OPENAI_API_KEY="your-openai-api-key"  # For OpenAI wrapper examples
+```
+
+### Running an Example
+
+```bash
+python examples/ai_wrappers/wrap_openai.py
+```
+
+Available examples:
+- `examples/ai_wrappers/wrap_openai.py` - Demonstrates wrapping OpenAI clients with Statsig telemetry (sync/async, streaming/non-streaming)
+
 ## Community
 
 If you need any assistance or just have a question, feel free to reach out to us on [Slack](https://statsig.com/community?ref=gh_jsm).

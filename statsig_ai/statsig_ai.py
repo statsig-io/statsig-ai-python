@@ -38,7 +38,7 @@ class StatsigAI(StatsigAIInstance):
 
 
 def create_statsig_ai_error_instance(message: str) -> StatsigAIInstance:
-    print("Error: ", message)
+    print("[Statsig] Error: ", message)
     return StatsigAIInstance(
         statsig_source=StatsigCreateConfig(sdk_key="__STATSIG_ERROR_SDK_KEY__")
     )
