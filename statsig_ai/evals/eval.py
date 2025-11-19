@@ -17,6 +17,7 @@ from typing import (
     cast,
 )
 
+import json
 import requests
 
 from .eval_types import (
@@ -112,6 +113,7 @@ def _send_eval_results(
     api_key: str,
     eval_run_name: Optional[str],
     summary_scores: Optional[Dict[str, float]],
+    parameters: Optional[EvalParameters],
 ) -> None:
     """Send eval results to Statsig API (synchronous, using requests)."""
 
@@ -128,6 +130,11 @@ def _send_eval_results(
         payload["name"] = eval_run_name
     if summary_scores:
         payload["summaryScores"] = summary_scores
+    if parameters:
+        payload["parameters"] = {
+            param: value if isinstance(value, str) else json.dumps(value)
+            for param, value in parameters.items()
+        }
     headers = {
         "Content-Type": "application/json",
         "STATSIG-API-KEY": api_key,
@@ -322,7 +329,7 @@ def Eval(
 
     summary_scores = _run_summary_scorer(summary_score_fn, results)
 
-    _send_eval_results(name, results, api_key, eval_run_name, summary_scores)
+    _send_eval_results(name, results, api_key, eval_run_name, summary_scores, parameters)
 
     return EvalResult(
         results=results,

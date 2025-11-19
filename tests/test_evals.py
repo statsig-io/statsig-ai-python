@@ -107,6 +107,7 @@ def test_eval_task_with_hook(eval_setup):
     assert len(payloads) == 1
     assert payloads[0]["results"][0]["output"] == "Hi world"
     assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    assert payloads[0]["parameters"] == {"prefix": "Hi"}
 
 
 def test_eval_multiple_scorers(eval_setup):
@@ -610,7 +611,7 @@ def test_eval_with_parameters(eval_setup):
         ],
         task=task_with_params,
         scorer=scorer,
-        parameters={"prefix": "Hi", "suffix": "!"},
+        parameters={"prefix": "Hi", "suffix": "!", "number": 123, "object": {"a": "b"}},
     )
 
     assert result.results[0].output == "Hi world!"
@@ -620,6 +621,7 @@ def test_eval_with_parameters(eval_setup):
     assert len(payloads) == 1
     assert payloads[0]["results"][0]["output"] == "Hi world!"
     assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    assert payloads[0]["parameters"] == {"prefix": "Hi", "suffix": "!", "number": "123", "object": "{\"a\": \"b\"}"}
 
 
 def test_eval_missing_api_key(httpserver: HTTPServer, monkeypatch):
