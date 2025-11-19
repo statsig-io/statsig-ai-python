@@ -10,3 +10,4 @@ pytest-asyncio
 werkzeug
 openai
 typing_extensions>=4.1.0
+tqdm

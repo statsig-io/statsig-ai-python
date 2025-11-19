@@ -50,6 +50,7 @@ setup(
         "opentelemetry-sdk",
         "opentelemetry-exporter-otlp-proto-http",
         "typing-extensions>=4.1.0",
+        "tqdm",
     ],
     tests_require=test_deps,
     extras_require=extras,

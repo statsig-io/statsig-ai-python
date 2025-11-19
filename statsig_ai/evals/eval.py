@@ -3,6 +3,7 @@ import inspect
 import logging
 import os
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from typing import (
     Any,
     AsyncIterator,
@@ -19,6 +20,7 @@ from typing import (
 
 import json
 import requests
+from tqdm.auto import tqdm
 
 from .eval_types import (
     EvalDataRecord,
@@ -42,6 +44,8 @@ from .eval_types import (
 
 
 T = TypeVar("T")
+
+_statsig_async_context_warning_shown = False
 
 
 async def to_async_iter(iterable: Iterable[T]) -> AsyncIterator[T]:
@@ -188,15 +192,19 @@ async def _run_task(
     else:
         raise TypeError(f"Invalid task signature: expected 1 or 2 parameters, got {num_args}")
 
-    if inspect.iscoroutinefunction(task):
-        return await task(*args)
+    try:
+        if inspect.iscoroutinefunction(task):
+            return await task(*args)
 
-    event_loop = asyncio.get_event_loop()
+        event_loop = asyncio.get_event_loop()
 
-    def sync_call() -> Output:
-        return task(*args)  # type: ignore
+        def sync_call() -> Output:
+            return task(*args)  # type: ignore
 
-    return await event_loop.run_in_executor(None, sync_call)
+        return await event_loop.run_in_executor(None, sync_call)
+    except Exception as err:
+        logging.warning("[Statsig] Task failed: %s | input=%r", err, input_value)
+        return cast(Output, "Error")
 
 
 async def _run_scorer(
@@ -242,43 +250,108 @@ async def _run_task_and_score_one_record(
     scorers: ScorerFnMap[Input, Output],
     data_record: EvalDataRecord[Input, Output],
     parameters: Optional[EvalParameters],
-) -> EvalResultRecord[Input, Optional[Output]]:
+) -> EvalResultRecord[Input, Output]:
     """Run task and score for one record asynchronously.
 
     Runs the task first, then runs all scorers concurrently on the output.
-    - If task errors: all scores are "error" and error flag is set
-    - If a scorer errors: that score is "0"
+    - If task errors: all scores are 0 and error flag is set
+    - If a scorer errors: that score is "0" (handled in _run_scorer)
     """
-    eval_result: EvalResultRecord[Input, Optional[Output]] = EvalResultRecord(
+    output: Output = await _run_task(
+        task, data_record.input, EvalHook(parameters=parameters, category=data_record.category)
+    )
+
+    if output == "Error":
+        return EvalResultRecord(
+            input=data_record.input,
+            expected=data_record.expected,
+            category=data_record.category,
+            output=output,
+            scores={name: 0.0 for name in scorers.keys()},
+            error=True,
+        )
+
+    scorer_tasks = [
+        _run_scorer(scorer_name, scorer_fn, output, data_record.expected, data_record.input)
+        for scorer_name, scorer_fn in scorers.items()
+    ]
+    score_results = await asyncio.gather(*scorer_tasks)
+
+    return EvalResultRecord(
         input=data_record.input,
         expected=data_record.expected,
         category=data_record.category,
-        output=None,
-        scores={},
+        output=output,
+        scores=dict(zip(scorers.keys(), score_results)),
         error=False,
     )
 
+
+def _get_running_event_loop() -> Optional[asyncio.AbstractEventLoop]:
     try:
-        hook = EvalHook(parameters=parameters, category=data_record.category)
-        output = await _run_task(task, data_record.input, hook)
-        eval_result.output = output
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
-        scorer_tasks = [
-            _run_scorer(scorer_name, scorer_fn, output, data_record.expected, data_record.input)
-            for scorer_name, scorer_fn in scorers.items()
-        ]
 
-        score_results = await asyncio.gather(*scorer_tasks)
+async def _run_eval_helper(
+    name: str,
+    data: EvalData[Input, Output],
+    task: EvalTask[Input, Output],
+    scorer: EvalScorer[Input, Output],
+    parameters: Optional[EvalParameters],
+    eval_run_name: Optional[str],
+    summary_score_fn: Optional[SummaryScorerFn[Input, Output]],
+) -> EvalResult[Input, Output]:
+    """
+    Core eval logic that runs asynchronously.
 
-        eval_result.scores = dict(zip(scorers.keys(), score_results))
+    This helper function contains the common evaluation logic used by both
+    Eval (sync) and EvalAsync (async) functions.
+    """
+    api_key = os.environ.get("STATSIG_API_KEY")
+    if not api_key:
+        raise RuntimeError("[Statsig] Missing STATSIG_API_KEY environment variable")
 
-    except Exception as err:
-        # Task failed - all scores should be nan, scoring errors are caught in _run_scorer
-        logging.warning("[Statsig] Task failed: %s | input=%r", err, data_record.input)
-        eval_result.error = True
-        eval_result.scores = {name: 0.0 for name in scorers.keys()}
+    logging.info("[Statsig] Running eval: %s", name)
 
-    return eval_result
+    data_iterator: AsyncIterator[EvalDataRecord[Input, Output]] = _normalize_into_data_iterator(
+        data
+    )
+    normalized_scorers: ScorerFnMap[Input, Output] = _normalize_scorers(scorer)
+
+    records: List[EvalDataRecord[Input, Output]] = []
+    async for record in data_iterator:
+        records.append(record)
+
+    tasks: List[asyncio.Task[EvalResultRecord[Input, Output]]] = []
+
+    for record in records:
+        tasks.append(
+            asyncio.create_task(
+                _run_task_and_score_one_record(task, normalized_scorers, record, parameters)
+            )
+        )
+
+    results: List[EvalResultRecord[Input, Output]] = []
+    for completed_task in tqdm(
+        asyncio.as_completed(tasks),
+        total=len(tasks),
+        desc=f"Running eval: {name}",
+    ):
+        results.append(await completed_task)
+
+    any_error = any(r.error for r in results)
+
+    summary_scores = _run_summary_scorer(summary_score_fn, results)
+
+    _send_eval_results(name, results, api_key, eval_run_name, summary_scores, parameters)
+
+    return EvalResult(
+        results=results,
+        metadata=EvalResultMetadata(error=any_error),
+        summary_scores=summary_scores,
+    )
 
 
 def Eval(
@@ -297,42 +370,84 @@ def Eval(
     Args:
         name: Name of the evaluation
         data: Evaluation data (iterable of records, can be async)
-        task: Task function(s) to run on each input (can be async, can be list)
+        task: Task function(s) to run on each input (can be async)
         scorer: Scorer function(s) to evaluate outputs (can be async, can be dict)
         parameters: Optional parameters to pass to tasks
         eval_run_name: Optional name for this eval run
         summary_score_fn: Optional function that takes a list of results and returns a dictionary of summary scores
 
     Returns:
-        Dictionary with 'results' and 'metadata' keys
+        EvalResult containing results, metadata, and optional summary_scores
+
+    Warning:
+        If called from within an async context, this will run in a separate thread.
+        Consider using EvalAsync instead for better performance and compatibility.
     """
-    api_key = os.environ.get("STATSIG_API_KEY")
-    if not api_key:
-        raise RuntimeError("[Statsig] Missing STATSIG_API_KEY environment variable")
+    global _statsig_async_context_warning_shown
 
-    data_iterator: AsyncIterator[EvalDataRecord[Input, Output]] = _normalize_into_data_iterator(
-        data
-    )
-    normalized_scorers: ScorerFnMap[Input, Output] = _normalize_scorers(scorer)
+    running_event_loop = _get_running_event_loop()
 
-    async def run_all():
-        tasks_to_run = []
-        async for record in data_iterator:
-            tasks_to_run.append(
-                _run_task_and_score_one_record(task, normalized_scorers, record, parameters)
+    if running_event_loop is not None:
+        # We're in an async context - need to run in a separate thread with a new event loop
+        if not _statsig_async_context_warning_shown:
+            logging.warning(
+                "[Statsig] Eval() called from within an async context. "
+                "Consider using EvalAsync() instead for better performance and to avoid event loop conflicts.",
             )
-        return await asyncio.gather(*tasks_to_run)
+            _statsig_async_context_warning_shown = True
 
-    results = asyncio.run(run_all())
+        def run_in_new_loop():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(
+                    _run_eval_helper(
+                        name, data, task, scorer, parameters, eval_run_name, summary_score_fn
+                    )
+                )
+            finally:
+                new_loop.close()
+                asyncio.set_event_loop(None)
 
-    any_error = any(r.error for r in results)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_in_new_loop)
+            return future.result()
 
-    summary_scores = _run_summary_scorer(summary_score_fn, results)
+    else:
+        return asyncio.run(
+            _run_eval_helper(name, data, task, scorer, parameters, eval_run_name, summary_score_fn)
+        )
 
-    _send_eval_results(name, results, api_key, eval_run_name, summary_scores, parameters)
 
-    return EvalResult(
-        results=results,
-        metadata=EvalResultMetadata(error=any_error),
-        summary_scores=summary_scores,
+async def EvalAsync(
+    name: str,
+    *,
+    data: EvalData[Input, Output],
+    task: Union[EvalTask[Input, Output]],
+    scorer: EvalScorer[Input, Output],
+    parameters: Optional[EvalParameters] = None,
+    eval_run_name: Optional[str] = None,
+    summary_score_fn: Optional[SummaryScorerFn[Input, Output]] = None,
+) -> EvalResult[Input, Output]:
+    """
+    Run evaluation asynchronously with support for async tasks, scorers, and data.
+
+    Args:
+        name: Name of the evaluation
+        data: Evaluation data (iterable of records, can be async)
+        task: Task function(s) to run on each input (can be async)
+        scorer: Scorer function(s) to evaluate outputs (can be async, can be dict)
+        parameters: Optional parameters to pass to tasks
+        eval_run_name: Optional name for this eval run
+        summary_score_fn: Optional function that takes a list of results and returns a dictionary of summary scores
+
+    Returns:
+        EvalResult containing results, metadata, and optional summary_scores
+
+    Note:
+        This is the async version of Eval(). Use this when calling from within
+        an async context for better performance and to avoid event loop conflicts.
+    """
+    return await _run_eval_helper(
+        name, data, task, scorer, parameters, eval_run_name, summary_score_fn
     )

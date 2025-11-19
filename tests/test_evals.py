@@ -5,6 +5,18 @@ from mock_scrapi import MockScrapi
 import math
 
 
+def results_by_input(results):
+    result_dict = {}
+    for r in results:
+        input_val = r.input if hasattr(r, "input") else r["input"]
+        if isinstance(input_val, dict):
+            key = tuple(sorted(input_val.items()))
+        else:
+            key = input_val
+        result_dict[key] = r
+    return result_dict
+
+
 @pytest.fixture
 def eval_setup(httpserver: HTTPServer, monkeypatch):
     from werkzeug import Response
@@ -64,20 +76,25 @@ def test_eval_basic_string(eval_setup):
 
     assert len(result.results) == 2
     assert result.metadata.error == False
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].expected == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
+
+    results = results_by_input(result.results)
+    assert results["world"].output == "Hello world"
+    assert results["world"].expected == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["test"].output == "Hello test"
+    assert results["test"].expected == "Hello test"
+    assert results["test"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    payload = payloads[0]
-    assert "results" in payload
-    assert len(payload["results"]) == 2
-    assert payload["results"][0]["input"] == "world"
-    assert payload["results"][0]["output"] == "Hello world"
-    assert payload["results"][0]["expected"] == "Hello world"
-    assert payload["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert len(payload_results) == 2
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["expected"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["test"]["output"] == "Hello test"
+    assert payload_results["test"]["expected"] == "Hello test"
+    assert payload_results["test"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_task_with_hook(eval_setup):
@@ -100,13 +117,15 @@ def test_eval_task_with_hook(eval_setup):
         parameters={"prefix": "Hi"},
     )
 
-    assert result.results[0].output == "Hi world"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].output == "Hi world"
+    assert results["world"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["output"] == "Hi world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["output"] == "Hi world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
     assert payloads[0]["parameters"] == {"prefix": "Hi"}
 
 
@@ -131,15 +150,17 @@ def test_eval_multiple_scorers(eval_setup):
         },
     )
 
-    assert "exact_match" in result.results[0].scores
-    assert "length" in result.results[0].scores
-    assert result.results[0].scores["exact_match"] == 1.0
-    assert result.results[0].scores["length"] == 1.0
+    results = results_by_input(result.results)
+    assert "exact_match" in results["world"].scores
+    assert "length" in results["world"].scores
+    assert results["world"].scores["exact_match"] == 1.0
+    assert results["world"].scores["length"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["scores"]["exact_match"] == 1.0
-    assert payloads[0]["results"][0]["scores"]["length"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["scores"]["exact_match"] == 1.0
+    assert payload_results["world"]["scores"]["length"] == 1.0
 
 
 def test_eval_async_task(eval_setup):
@@ -160,13 +181,15 @@ def test_eval_async_task(eval_setup):
         scorer=scorer,
     )
 
-    assert result.results[0].output == "Async world"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].output == "Async world"
+    assert results["world"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["output"] == "Async world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["output"] == "Async world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_async_scorer(eval_setup):
@@ -184,11 +207,13 @@ def test_eval_async_scorer(eval_setup):
         scorer=async_scorer,
     )
 
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_dict_input(eval_setup):
@@ -206,15 +231,18 @@ def test_eval_dict_input(eval_setup):
         scorer=scorer,
     )
 
-    assert result.results[0].input == {"name": "Alice", "age": 30}
-    assert result.results[0].output == "Hello Alice"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    dict_key = (("age", 30), ("name", "Alice"))
+    assert results[dict_key].input == {"name": "Alice", "age": 30}
+    assert results[dict_key].output == "Hello Alice"
+    assert results[dict_key].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["input"] == {"name": "Alice", "age": 30}
-    assert payloads[0]["results"][0]["output"] == "Hello Alice"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results[dict_key]["input"] == {"name": "Alice", "age": 30}
+    assert payload_results[dict_key]["output"] == "Hello Alice"
+    assert payload_results[dict_key]["scores"]["Grader"] == 1.0
 
 
 def test_eval_int_input(eval_setup):
@@ -233,15 +261,23 @@ def test_eval_int_input(eval_setup):
         scorer=scorer,
     )
 
-    assert result.results[0].input == 5
-    assert result.results[0].output == 10
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results[5].input == 5
+    assert results[5].output == 10
+    assert results[5].scores["Grader"] == 1.0
+    assert results[3].input == 3
+    assert results[3].output == 6
+    assert results[3].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["input"] == 5
-    assert payloads[0]["results"][0]["output"] == 10
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results[5]["input"] == 5
+    assert payload_results[5]["output"] == 10
+    assert payload_results[5]["scores"]["Grader"] == 1.0
+    assert payload_results[3]["input"] == 3
+    assert payload_results[3]["output"] == 6
+    assert payload_results[3]["scores"]["Grader"] == 1.0
 
 
 def test_eval_dataclass_records(eval_setup):
@@ -261,14 +297,20 @@ def test_eval_dataclass_records(eval_setup):
     )
 
     assert len(result.results) == 2
-    assert result.results[0].scores["Grader"] == 1.0
-    assert result.results[0].output == "Hello world"
+    results = results_by_input(result.results)
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["world"].output == "Hello world"
+    assert results["test"].scores["Grader"] == 1.0
+    assert results["test"].output == "Hello test"
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert len(payloads[0]["results"]) == 2
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
-    assert payloads[0]["results"][0]["output"] == "Hello world"
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["test"]["scores"]["Grader"] == 1.0
+    assert payload_results["test"]["output"] == "Hello test"
 
 
 def test_eval_iterator_data(eval_setup):
@@ -289,19 +331,24 @@ def test_eval_iterator_data(eval_setup):
     )
 
     assert len(result.results) == 2
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
-    assert result.results[1].input == "test"
-    assert result.results[1].output == "Hello test"
-    assert result.results[1].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["test"].input == "test"
+    assert results["test"].output == "Hello test"
+    assert results["test"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert len(payloads[0]["results"]) == 2
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["test"]["input"] == "test"
+    assert payload_results["test"]["output"] == "Hello test"
+    assert payload_results["test"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_callable_data(eval_setup):
@@ -324,16 +371,24 @@ def test_eval_callable_data(eval_setup):
     )
 
     assert len(result.results) == 2
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["test"].input == "test"
+    assert results["test"].output == "Hello test"
+    assert results["test"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert len(payloads[0]["results"]) == 2
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["test"]["input"] == "test"
+    assert payload_results["test"]["output"] == "Hello test"
+    assert payload_results["test"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_async_callable_data(eval_setup):
@@ -356,16 +411,24 @@ def test_eval_async_callable_data(eval_setup):
     )
 
     assert len(result.results) == 2
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["test"].input == "test"
+    assert results["test"].output == "Hello test"
+    assert results["test"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert len(payloads[0]["results"]) == 2
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["test"]["input"] == "test"
+    assert payload_results["test"]["output"] == "Hello test"
+    assert payload_results["test"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_async_iterator_data(eval_setup):
@@ -386,16 +449,24 @@ def test_eval_async_iterator_data(eval_setup):
     )
 
     assert len(result.results) == 2
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["test"].input == "test"
+    assert results["test"].output == "Hello test"
+    assert results["test"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert len(payloads[0]["results"]) == 2
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["test"]["input"] == "test"
+    assert payload_results["test"]["output"] == "Hello test"
+    assert payload_results["test"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_with_categories(eval_setup):
@@ -417,13 +488,15 @@ def test_eval_with_categories(eval_setup):
         scorer=scorer,
     )
 
-    assert result.results[0].category == "greeting"
-    assert result.results[1].category == ["greeting", "test"]
+    results = results_by_input(result.results)
+    assert results["world"].category == "greeting"
+    assert results["test"].category == ["greeting", "test"]
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["category"] == "greeting"
-    assert payloads[0]["results"][1]["category"] == ["greeting", "test"]
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["category"] == "greeting"
+    assert payload_results["test"]["category"] == ["greeting", "test"]
 
 
 def test_eval_without_expected(eval_setup):
@@ -442,15 +515,19 @@ def test_eval_without_expected(eval_setup):
         scorer=scorer,
     )
 
-    assert result.results[0].expected is None
-    assert result.results[0].scores["Grader"] == 1.0
-    assert result.results[1].scores["Grader"] == 0.0
+    results = results_by_input(result.results)
+    assert results["world"].expected is None
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["hi"].expected is None
+    assert results["hi"].scores["Grader"] == 0.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0].get("expected") is None
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
-    assert payloads[0]["results"][1]["scores"]["Grader"] == 0.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"].get("expected") is None
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["hi"].get("expected") is None
+    assert payload_results["hi"]["scores"]["Grader"] == 0.0
 
 
 def test_eval_with_run_name(eval_setup):
@@ -469,16 +546,18 @@ def test_eval_with_run_name(eval_setup):
         eval_run_name="test_run_123",
     )
 
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert payloads[0].get("name") == "test_run_123"
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_task_error(eval_setup):
@@ -496,24 +575,27 @@ def test_eval_task_error(eval_setup):
         "test_task_error",
         data=[
             {"input": "world", "expected": "Hello world"},
-            {"input": "fail", "expected": "Hello fail"},
+            {"input": "fail", "expected": "Error"},
         ],
         task=failing_task,
         scorer=scorer,
     )
 
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].error == False
-    assert result.results[1].error == True
-    assert result.results[1].scores["Grader"] == 0.0
+    results = results_by_input(result.results)
+    assert results["world"].output == "Hello world"
+    assert results["world"].error == False
+    assert results["fail"].error == True
+    assert results["fail"].scores["Grader"] == 0.0
     assert result.metadata.error == True
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["error"] == False
-    assert payloads[0]["results"][1]["error"] == True
-    assert result.results[1].scores["Grader"] == 0.0
+
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["error"] == False
+    assert payload_results["fail"]["error"] == True
+    assert payload_results["fail"]["scores"]["Grader"] == 0.0
 
 
 def test_eval_scorer_error(eval_setup):
@@ -534,15 +616,17 @@ def test_eval_scorer_error(eval_setup):
         scorer=failing_scorer,
     )
 
-    assert result.results[0].scores["Grader"] == 1.0
-    assert result.results[1].scores["Grader"] == 0.0
-    assert result.results[1].error == False
+    results = results_by_input(result.results)
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["fail"].scores["Grader"] == 0.0
+    assert results["fail"].error == False
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
-    assert payloads[0]["results"][1]["scores"]["Grader"] == 0.0
-    assert payloads[0]["results"][1]["error"] == False
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["fail"]["scores"]["Grader"] == 0.0
+    assert payload_results["fail"]["error"] == False
 
 
 def test_eval_boolean_scorer(eval_setup):
@@ -561,13 +645,15 @@ def test_eval_boolean_scorer(eval_setup):
         scorer=bool_scorer,
     )
 
-    assert result.results[0].scores["Grader"] == 1.0
-    assert result.results[1].scores["Grader"] == 0.0
+    results = results_by_input(result.results)
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["test"].scores["Grader"] == 0.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
-    assert payloads[0]["results"][1]["scores"]["Grader"] == 0.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["test"]["scores"]["Grader"] == 0.0
 
 
 def test_eval_class_based_scorer(eval_setup):
@@ -586,11 +672,13 @@ def test_eval_class_based_scorer(eval_setup):
         scorer=MyScorer,
     )
 
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_with_parameters(eval_setup):
@@ -614,14 +702,21 @@ def test_eval_with_parameters(eval_setup):
         parameters={"prefix": "Hi", "suffix": "!", "number": 123, "object": {"a": "b"}},
     )
 
-    assert result.results[0].output == "Hi world!"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].output == "Hi world!"
+    assert results["world"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
-    assert payloads[0]["results"][0]["output"] == "Hi world!"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
-    assert payloads[0]["parameters"] == {"prefix": "Hi", "suffix": "!", "number": "123", "object": "{\"a\": \"b\"}"}
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["output"] == "Hi world!"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payloads[0]["parameters"] == {
+        "prefix": "Hi",
+        "suffix": "!",
+        "number": "123",
+        "object": '{"a": "b"}',
+    }
 
 
 def test_eval_missing_api_key(httpserver: HTTPServer, monkeypatch):
@@ -704,16 +799,18 @@ def test_eval_without_summary_scorer(eval_setup):
     )
 
     assert result.summary_scores is None
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert "summaryScores" not in payloads[0]
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
 
 
 def test_eval_summary_scorer_with_multiple_scorers(eval_setup):
@@ -755,14 +852,15 @@ def test_eval_summary_scorer_with_multiple_scorers(eval_setup):
         summary_score_fn=summary_scorer,
     )
 
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["exact_match"] == 1.0
-    assert result.results[0].scores["length"] == 1.0
-    assert result.results[2].input == "a"
-    assert result.results[2].output == "Hello a"
-    assert result.results[2].scores["exact_match"] == 0.0
-    assert result.results[2].scores["length"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["exact_match"] == 1.0
+    assert results["world"].scores["length"] == 1.0
+    assert results["a"].input == "a"
+    assert results["a"].output == "Hello a"
+    assert results["a"].scores["exact_match"] == 0.0
+    assert results["a"].scores["length"] == 1.0
 
     assert result.summary_scores is not None
     assert result.summary_scores["avg_exact_match"] == pytest.approx(2.0 / 3.0)
@@ -773,10 +871,11 @@ def test_eval_summary_scorer_with_multiple_scorers(eval_setup):
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert "summaryScores" in payloads[0]
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["exact_match"] == 1.0
-    assert payloads[0]["results"][0]["scores"]["length"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["exact_match"] == 1.0
+    assert payload_results["world"]["scores"]["length"] == 1.0
     assert payloads[0]["summaryScores"]["avg_exact_match"] == pytest.approx(2.0 / 3.0)
     assert payloads[0]["summaryScores"]["avg_length"] == 1.0
     assert payloads[0]["summaryScores"]["min_exact_match"] == 0.0
@@ -803,17 +902,19 @@ def test_eval_summary_scorer_error_handling(eval_setup):
     )
 
     assert result.summary_scores is None
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert "results" in payloads[0]
     assert len(payloads[0]["results"]) == 1
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
     assert "summaryScores" not in payloads[0]
 
 
@@ -855,14 +956,15 @@ def test_eval_summary_scorer_with_categories(eval_setup):
         summary_score_fn=summary_scorer,
     )
 
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].category == "greeting"
-    assert result.results[0].scores["Grader"] == 1.0
-    assert result.results[2].input == "foo"
-    assert result.results[2].output == "Hello foo"
-    assert result.results[2].category == "farewell"
-    assert result.results[2].scores["Grader"] == 0.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].category == "greeting"
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["foo"].input == "foo"
+    assert results["foo"].output == "Hello foo"
+    assert results["foo"].category == "farewell"
+    assert results["foo"].scores["Grader"] == 0.0
 
     assert result.summary_scores is not None
     assert "greeting_avg" in result.summary_scores
@@ -873,13 +975,14 @@ def test_eval_summary_scorer_with_categories(eval_setup):
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert "summaryScores" in payloads[0]
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["category"] == "greeting"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
-    assert payloads[0]["results"][2]["input"] == "foo"
-    assert payloads[0]["results"][2]["output"] == "Hello foo"
-    assert payloads[0]["results"][2]["scores"]["Grader"] == 0.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["category"] == "greeting"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["foo"]["input"] == "foo"
+    assert payload_results["foo"]["output"] == "Hello foo"
+    assert payload_results["foo"]["scores"]["Grader"] == 0.0
     assert "greeting_avg" in payloads[0]["summaryScores"]
     assert "farewell_avg" in payloads[0]["summaryScores"]
     assert payloads[0]["summaryScores"]["greeting_avg"] == 1.0
@@ -962,17 +1065,18 @@ def test_eval_summary_scorer_with_task_errors(eval_setup):
         summary_score_fn=summary_scorer,
     )
 
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].error == False
-    assert result.results[0].scores["Grader"] == 1.0
-    assert result.results[1].input == "fail"
-    assert result.results[1].error == True
-    assert result.results[1].scores["Grader"] == 0.0
-    assert result.results[2].input == "test"
-    assert result.results[2].output == "Hello test"
-    assert result.results[2].error == False
-    assert result.results[2].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].error == False
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["fail"].input == "fail"
+    assert results["fail"].error == True
+    assert results["fail"].scores["Grader"] == 0.0
+    assert results["test"].input == "test"
+    assert results["test"].output == "Hello test"
+    assert results["test"].error == False
+    assert results["test"].scores["Grader"] == 1.0
 
     assert result.summary_scores is not None
     assert result.summary_scores["error_count"] == 1
@@ -983,16 +1087,17 @@ def test_eval_summary_scorer_with_task_errors(eval_setup):
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert "summaryScores" in payloads[0]
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["error"] == False
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
-    assert payloads[0]["results"][1]["input"] == "fail"
-    assert payloads[0]["results"][1]["error"] == True
-    assert payloads[0]["results"][1]["scores"]["Grader"] == 0.0
-    assert payloads[0]["results"][2]["input"] == "test"
-    assert payloads[0]["results"][2]["output"] == "Hello test"
-    assert payloads[0]["results"][2]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["error"] == False
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["fail"]["input"] == "fail"
+    assert payload_results["fail"]["error"] == True
+    assert payload_results["fail"]["scores"]["Grader"] == 0.0
+    assert payload_results["test"]["input"] == "test"
+    assert payload_results["test"]["output"] == "Hello test"
+    assert payload_results["test"]["scores"]["Grader"] == 1.0
     assert payloads[0]["summaryScores"]["error_count"] == 1
     assert payloads[0]["summaryScores"]["success_count"] == 2
     assert payloads[0]["summaryScores"]["avg_score"] == pytest.approx(2.0 / 3.0)
@@ -1020,21 +1125,23 @@ def test_eval_summary_scorer_throws_during_computation(eval_setup):
         summary_score_fn=failing_summary_scorer,
     )
 
-    assert result.results[0].input == "world"
-    assert result.results[0].output == "Hello world"
-    assert result.results[0].scores["Grader"] == 1.0
-    assert result.results[1].input == "test"
-    assert result.results[1].output == "Hello test"
-    assert result.results[1].scores["Grader"] == 1.0
+    results = results_by_input(result.results)
+    assert results["world"].input == "world"
+    assert results["world"].output == "Hello world"
+    assert results["world"].scores["Grader"] == 1.0
+    assert results["test"].input == "test"
+    assert results["test"].output == "Hello test"
+    assert results["test"].scores["Grader"] == 1.0
     assert result.summary_scores is None
 
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     assert len(payloads[0]["results"]) == 2
-    assert payloads[0]["results"][0]["input"] == "world"
-    assert payloads[0]["results"][0]["output"] == "Hello world"
-    assert payloads[0]["results"][0]["scores"]["Grader"] == 1.0
-    assert payloads[0]["results"][1]["input"] == "test"
-    assert payloads[0]["results"][1]["output"] == "Hello test"
-    assert payloads[0]["results"][1]["scores"]["Grader"] == 1.0
+    payload_results = results_by_input(payloads[0]["results"])
+    assert payload_results["world"]["input"] == "world"
+    assert payload_results["world"]["output"] == "Hello world"
+    assert payload_results["world"]["scores"]["Grader"] == 1.0
+    assert payload_results["test"]["input"] == "test"
+    assert payload_results["test"]["output"] == "Hello test"
+    assert payload_results["test"]["scores"]["Grader"] == 1.0
     assert "summaryScores" not in payloads[0]
