@@ -70,37 +70,17 @@ EvalData = Union[
 ]
 
 # ================================
-# Eval Result Types
-# ================================
-
-
-@dataclass
-class EvalResultMetadata(SerializableDataClass):
-    error: bool
-
-
-@dataclass
-class EvalResultRecord(SerializableDataClass, Generic[Input, Output]):
-    input: Input
-    output: Output
-    scores: Dict[str, float]
-    expected: Optional[Output] = None
-    error: Optional[bool] = False
-    category: Optional[Union[Sequence[str], str]] = None
-
-
-@dataclass
-class EvalResult(SerializableDataClass, Generic[Input, Output]):
-    results: List[EvalResultRecord[Input, Output]]
-    metadata: EvalResultMetadata
-    summary_scores: Optional[Dict[str, float]] = None
-
-
-# ================================
 # Eval Scorer Type
 # ================================
 
-Score = Union[int, float, bool]
+OnlyScore = Union[int, float, bool]
+
+@dataclass
+class ScoreWithMetadata(SerializableDataClass):
+    score: OnlyScore
+    metadata: Optional[Dict[str, str]] = None
+
+Score = Union[OnlyScore, ScoreWithMetadata]
 
 
 @dataclass
@@ -130,6 +110,42 @@ Scorer = Union[
 ScorerFnMap = Dict[str, Scorer[Input, Output]]
 
 EvalScorer = Union[Scorer[Input, Output], ScorerFnMap[Input, Output]]
+
+
+# ================================
+# Eval Result Types
+# ================================
+
+
+@dataclass
+class EvalResultMetadata(SerializableDataClass):
+    error: bool
+
+
+@dataclass
+class EvalResultRecordWithMetadata(SerializableDataClass, Generic[Input, Output]):
+    input: Input
+    output: Output
+    scores: Dict[str, ScoreWithMetadata]
+    expected: Optional[Output] = None
+    error: Optional[bool] = False
+    category: Optional[Union[Sequence[str], str]] = None
+
+@dataclass
+class EvalResultRecord(SerializableDataClass, Generic[Input, Output]):
+    input: Input
+    output: Output
+    scores: Dict[str, float]
+    expected: Optional[Output] = None
+    error: Optional[bool] = False
+    category: Optional[Union[Sequence[str], str]] = None
+
+
+@dataclass
+class EvalResult(SerializableDataClass, Generic[Input, Output]):
+    results: List[EvalResultRecord[Input, Output]]
+    metadata: EvalResultMetadata
+    summary_scores: Optional[Dict[str, float]] = None
 
 
 # ================================

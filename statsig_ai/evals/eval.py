@@ -27,12 +27,14 @@ from .eval_types import (
     EvalHook,
     EvalResult,
     EvalResultMetadata,
+    EvalResultRecordWithMetadata,
     EvalScorerArgs,
     Input,
     ScorerFnMap,
     Scorer,
     Output,
     Score,
+    ScoreWithMetadata,
     EvalData,
     EvalTask,
     EvalScorer,
@@ -100,6 +102,9 @@ def _normalize_scorers(scorers: EvalScorer) -> ScorerFnMap[Input, Output]:
 
 def _normalize_score_value(score_value: Score) -> float:
     """Convert a score to a consistent float value."""
+    if isinstance(score_value, ScoreWithMetadata):
+        # Extract the score from ScoreWithMetadata
+        return _normalize_score_value(score_value.score)
     if isinstance(score_value, bool):
         return 1.0 if score_value else 0.0
     if isinstance(score_value, (int, float)):
@@ -113,7 +118,7 @@ def _normalize_score_value(score_value: Score) -> float:
 
 def _send_eval_results(
     name: str,
-    records: List[EvalResultRecord[Input, Output]],
+    records: List[EvalResultRecordWithMetadata[Input, Output]],
     api_key: str,
     eval_run_name: Optional[str],
     summary_scores: Optional[Dict[str, float]],
@@ -213,8 +218,8 @@ async def _run_scorer(
     output: Output,
     expected: Optional[Output],
     input_value: Input,
-) -> float:
-    """Run a single scorer and return normalized score as float."""
+) -> ScoreWithMetadata:
+    """Run a single scorer and return ScoreWithMetadata."""
     try:
         args = EvalScorerArgs(input=input_value, output=output, expected=expected)
 
@@ -234,7 +239,39 @@ async def _run_scorer(
         if inspect.isawaitable(raw_score):
             raw_score = await raw_score
 
-        return _normalize_score_value(raw_score)
+        if isinstance(raw_score, ScoreWithMetadata):
+            return ScoreWithMetadata(
+                score=_normalize_score_value(raw_score.score),
+                metadata=raw_score.metadata
+            )
+
+        if isinstance(raw_score, dict):
+            if "score" not in raw_score:
+                raise ValueError(
+                    f"Scorer '{scorer_name}' returned a dict without a 'score' key. "
+                    f"Expected dict with {{'score': float, 'metadata': dict}} or a numeric value (int/float/bool)."
+                )
+
+            valid_keys = {"score", "metadata"}
+            invalid_keys = set(raw_score.keys()) - valid_keys
+            if invalid_keys:
+                raise ValueError(
+                    f"Scorer '{scorer_name}' returned a dict with invalid keys: {invalid_keys}. "
+                    f"Only 'score' and 'metadata' keys are allowed"
+                )
+
+            return ScoreWithMetadata(
+                score=_normalize_score_value(raw_score.get("score", 0.0)),
+                metadata=raw_score.get("metadata")
+            )
+
+        if isinstance(raw_score, (int, float, bool)):
+            return ScoreWithMetadata(score=_normalize_score_value(raw_score), metadata=None)
+
+        raise TypeError(
+            f"Scorer '{scorer_name}' returned invalid type: {type(raw_score).__name__}. "
+            f"Expected one of: int, float, bool, dict with 'score' key, or ScoreWithMetadata object."
+        )
     except Exception as err:
         logging.warning(
             "[Statsig] Scorer '%s' failed: %s | input=%r",
@@ -242,7 +279,7 @@ async def _run_scorer(
             err,
             input_value,
         )
-        return 0.0
+        return ScoreWithMetadata(score=0.0, metadata=None)
 
 
 async def _run_task_and_score_one_record(
@@ -250,7 +287,7 @@ async def _run_task_and_score_one_record(
     scorers: ScorerFnMap[Input, Output],
     data_record: EvalDataRecord[Input, Output],
     parameters: Optional[EvalParameters],
-) -> EvalResultRecord[Input, Output]:
+) -> EvalResultRecordWithMetadata[Input, Output]:
     """Run task and score for one record asynchronously.
 
     Runs the task first, then runs all scorers concurrently on the output.
@@ -262,12 +299,12 @@ async def _run_task_and_score_one_record(
     )
 
     if output == "Error":
-        return EvalResultRecord(
+        return EvalResultRecordWithMetadata(
             input=data_record.input,
             expected=data_record.expected,
             category=data_record.category,
             output=output,
-            scores={name: 0.0 for name in scorers.keys()},
+            scores={name: ScoreWithMetadata(score=0.0, metadata=None) for name in scorers.keys()},
             error=True,
         )
 
@@ -277,7 +314,7 @@ async def _run_task_and_score_one_record(
     ]
     score_results = await asyncio.gather(*scorer_tasks)
 
-    return EvalResultRecord(
+    return EvalResultRecordWithMetadata(
         input=data_record.input,
         expected=data_record.expected,
         category=data_record.category,
@@ -293,6 +330,20 @@ def _get_running_event_loop() -> Optional[asyncio.AbstractEventLoop]:
     except RuntimeError:
         return None
 
+
+def _convert_results_to_results_without_metadata(
+    results_with_metadata: List[EvalResultRecordWithMetadata[Input, Output]]
+) -> List[EvalResultRecord[Input, Output]]:
+    """Convert EvalResultRecordWithMetadata to EvalResultRecord by extracting float scores."""
+    results_without_metadata = [EvalResultRecord(
+        input=result.input,
+        output=result.output,
+        scores={name: _normalize_score_value(score.score) for name, score in result.scores.items()},
+        expected=result.expected,
+        error=result.error,
+        category=result.category,
+    ) for result in results_with_metadata]
+    return results_without_metadata
 
 async def _run_eval_helper(
     name: str,
@@ -324,7 +375,7 @@ async def _run_eval_helper(
     async for record in data_iterator:
         records.append(record)
 
-    tasks: List[asyncio.Task[EvalResultRecord[Input, Output]]] = []
+    tasks: List[asyncio.Task[EvalResultRecordWithMetadata[Input, Output]]] = []
 
     for record in records:
         tasks.append(
@@ -333,7 +384,7 @@ async def _run_eval_helper(
             )
         )
 
-    results: List[EvalResultRecord[Input, Output]] = []
+    results: List[EvalResultRecordWithMetadata[Input, Output]] = []
     for completed_task in tqdm(
         asyncio.as_completed(tasks),
         total=len(tasks),
@@ -343,12 +394,14 @@ async def _run_eval_helper(
 
     any_error = any(r.error for r in results)
 
-    summary_scores = _run_summary_scorer(summary_score_fn, results)
+    results_without_metadata = _convert_results_to_results_without_metadata(results)
+
+    summary_scores = _run_summary_scorer(summary_score_fn, results_without_metadata)
 
     _send_eval_results(name, results, api_key, eval_run_name, summary_scores, parameters)
 
     return EvalResult(
-        results=results,
+        results=results_without_metadata,
         metadata=EvalResultMetadata(error=any_error),
         summary_scores=summary_scores,
     )
