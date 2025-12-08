@@ -47,7 +47,7 @@ OPERATION_REQUIRED_ATTRIBUTES = {
         "id": True,
         "finish_reasons": False,
         "output_tokens": True,
-        "otel_semantic_name": "responses.create",
+        "otel_semantic_name": "generate_content",
     },
 }
 
@@ -293,6 +293,20 @@ TEST_CASES = [
         },
         capture_options=GenAICaptureOptions(),
     ),
+    OpenAITestCase(
+        name="responses_capture_input_output",
+        operation="openai.responses.create",
+        client_type="sync",
+        is_stream=False,
+        api_method="responses.create",
+        kwargs={
+            "model": TEST_MODEL,
+            "input": [{"role": "user", "content": "Test responses input and output capture"}],
+        },
+        capture_options=GenAICaptureOptions(
+            capture_input_messages=True, capture_output_messages=True
+        ),
+    ),
 ]
 
 
@@ -395,11 +409,11 @@ def validate_capture_options(
         assert isinstance(output_messages, list), "gen_ai.output.messages should be a list"
 
     if capture_options.capture_system_instructions or capture_options.capture_all:
-        if "gen_ai.system.instructions" in metadata:
-            system_instructions = json.loads(metadata["gen_ai.system.instructions"])
+        if "gen_ai.system_instructions" in metadata:
+            system_instructions = json.loads(metadata["gen_ai.system_instructions"])
             assert isinstance(
                 system_instructions, list
-            ), "gen_ai.system.instructions should be a list"
+            ), "gen_ai.system_instructions should be a list"
 
     if capture_options.capture_tool_definitions or capture_options.capture_all:
         assert (
@@ -432,16 +446,6 @@ def get_method_from_client(client, api_method: str):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("test_case", TEST_CASES, ids=lambda tc: tc.name)
 async def test_openai_wrapper_matrix(statsig_setup, test_case: OpenAITestCase):
-    """
-    Test OpenAI wrapper with various operations, client types, and modes.
-
-    This test:
-    1. Creates the appropriate client (sync/async)
-    2. Wraps it with telemetry tracking
-    3. Executes the API call
-    4. Validates that telemetry events are logged correctly
-    5. Verifies operation-specific attributes are present
-    """
     mock_scrapi = statsig_setup
 
     print(f"\n{'='*60}")
@@ -526,3 +530,70 @@ async def test_openai_wrapper_matrix(statsig_setup, test_case: OpenAITestCase):
     print(f"\n  ✅ {test_case.name} PASSED")
     print(f"  Metadata keys: {sorted(metadata.keys())}")
     print(f"{'='*60}\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "is_stream",
+    [False, True],
+    ids=["non_stream", "stream"],
+)
+async def test_reasoning_tokens_gpt5_nano_responses(statsig_setup, is_stream):
+    mock_scrapi = statsig_setup
+    mock_scrapi.reset()
+
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    wrapped_client = wrap_openai(client)
+
+    kwargs = {
+        "model": "gpt-5-nano",
+        "reasoning": {"effort": "low"},
+        "input": [
+            {
+                "role": "user",
+                "content": "Solve this algorithm problem: Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.",
+            }
+        ],
+    }
+
+    if is_stream:
+        kwargs["stream"] = True
+
+    result = wrapped_client.responses.create(**kwargs)
+
+    if is_stream:
+        for chunk in result:
+            print(chunk)
+            pass
+
+    await asyncio.sleep(0.5)
+    StatsigAI.shared().flush_events()
+
+    events = mock_scrapi.get_logged_events()
+    gen_ai_events = [e for e in events if e.get("eventName") == "statsig::gen_ai"]
+
+    assert len(gen_ai_events) > 0, f"No gen_ai events logged. Total events: {len(events)}"
+
+    event = gen_ai_events[-1]
+    metadata = event["metadata"]
+
+    assert "gen_ai.provider.name" in metadata
+    assert metadata["gen_ai.provider.name"] == "openai"
+    assert "gen_ai.request.model" in metadata
+    assert metadata["gen_ai.request.model"] == "gpt-5-nano"
+
+    assert "gen_ai.operation.source_name" in metadata
+    assert metadata["gen_ai.operation.source_name"] == "openai.responses.create"
+
+    assert "gen_ai.usage.input_tokens" in metadata
+    assert "gen_ai.usage.output_tokens" in metadata
+
+    if "statsig.gen_ai.usage.output_reasoning_tokens" in metadata:
+        reasoning_tokens = int(metadata["statsig.gen_ai.usage.output_reasoning_tokens"])
+        assert reasoning_tokens > 0, "Reasoning tokens should be positive"
+        assert isinstance(reasoning_tokens, int), "Reasoning tokens should be an integer"
+
+    if is_stream:
+        assert "statsig.gen_ai.server.time_to_first_token_ms" in metadata
+        ttft_ms = float(metadata["statsig.gen_ai.server.time_to_first_token_ms"])
+        assert ttft_ms > 0, f"Time to first token should be positive, got {ttft_ms}"

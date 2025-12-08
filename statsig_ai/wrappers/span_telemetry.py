@@ -74,7 +74,7 @@ class SpanTelemetry:
 
     def record_time_to_first_token(self) -> None:
         elapsed = time.time() - self.start_time
-        self.set_attributes({"statsig.gen_ai.server.time_to_first_token_ms": elapsed * 1000})
+        self.set_attributes({"statsig.gen_ai.server.time_to_first_token_ms": round(elapsed * 1000)})
 
     def record_exception(self, error: Any) -> None:
         self.span.record_exception(error)

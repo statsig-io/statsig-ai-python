@@ -7,6 +7,7 @@ from opentelemetry.trace import SpanKind, StatusCode
 from statsig_ai.wrappers.genai_attribute_helper import (
     extract_genai_attributes,
     extract_opt_in_attributes,
+    extract_oai_usage_attributes,
 )
 from .configs import WrapOpenAIOptions
 from .span_telemetry import SpanTelemetry
@@ -18,6 +19,10 @@ OTEL_OP_NAME_MAP = {
     "openai.chat.completions.create": "chat",
     "openai.completions.create": "text_completion",
     "openai.embeddings.create": "embeddings",
+    "openai.images.generate": "generate_content",
+    "openai.responses.create": "generate_content",
+    "openai.responses.stream": "generate_content",
+    "openai.responses.parse": "generate_content",
 }
 
 
@@ -79,6 +84,7 @@ class BaseWrapper:
 
                 # Sync non-streaming: extract telemetry immediately from complete response
                 self._record_attributes(telemetry, model, kwargs, result)
+                telemetry.record_time_to_first_token()
                 telemetry.set_status({"code": StatusCode.OK})
                 return result
 
@@ -262,10 +268,7 @@ def _parse_chat_completion_chunks(items, _operation_name: str, _model: str, _kwa
         attrs["gen_ai.response.model"] = response_model
 
     if usage_data:
-        if prompt_tokens := usage_data.get("prompt_tokens"):
-            attrs["gen_ai.usage.input_tokens"] = prompt_tokens
-        if completion_tokens := usage_data.get("completion_tokens"):
-            attrs["gen_ai.usage.output_tokens"] = completion_tokens
+        attrs.update(extract_oai_usage_attributes(usage_data))
 
     result_choices = []
     for index in sorted(choice_deltas):
@@ -336,10 +339,7 @@ def _parse_responses_api_chunks(items, _operation_name: str, _model: str, _kwarg
             attrs["gen_ai.response.model"] = response_model
 
         usage = final_response.get("usage", {})
-        if input_tokens := usage.get("input_tokens"):
-            attrs["gen_ai.usage.input_tokens"] = input_tokens
-        if output_tokens := usage.get("output_tokens"):
-            attrs["gen_ai.usage.output_tokens"] = output_tokens
+        attrs.update(extract_oai_usage_attributes(usage))
 
         if status := final_response.get("status"):
             attrs["gen_ai.response.finish_reasons"] = [status]
