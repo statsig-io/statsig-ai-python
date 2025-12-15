@@ -6,6 +6,16 @@ from .statsig_ai import StatsigAI
 from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig
 from .evals import Eval, EvalScorerArgs, EvalDataRecord, EvalHook
 from .wrappers import wrap_openai, WrapOpenAIOptions, GenAICaptureOptions
+from .otel import (
+    initialize_tracing,
+    InitializeTracingOptions,
+    InitializeTracingResult,
+    StatsigOTLPTraceExporter,
+    StatsigOTLPTraceExporterOptions,
+    StatsigSpanProcessor,
+    OtelSingleton,
+    NoopOtelSingleton,
+)
 
 __all__ = [
     "StatsigAI",
@@ -30,4 +40,12 @@ __all__ = [
     "wrap_openai",
     "WrapOpenAIOptions",
     "GenAICaptureOptions",
+    # OTEL
+    "initialize_tracing",
+    "InitializeTracingOptions",
+    "InitializeTracingResult",
+    "StatsigOTLPTraceExporter",
+    "StatsigOTLPTraceExporterOptions",
+    "StatsigSpanProcessor",
+    "OtelSingleton",
 ]

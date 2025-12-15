@@ -13,9 +13,21 @@ Prerequisites:
 """
 
 import asyncio
+import logging
 import os
+
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger("opentelemetry").setLevel(logging.DEBUG)
+
 from openai import OpenAI, AsyncOpenAI
-from statsig_ai import StatsigAI, StatsigCreateConfig, wrap_openai
+from statsig_ai import (
+    InitializeTracingOptions,
+    StatsigAI,
+    StatsigCreateConfig,
+    StatsigOTLPTraceExporterOptions,
+    initialize_tracing,
+    wrap_openai,
+)
 
 
 def sync_non_streaming_example():
@@ -114,10 +126,23 @@ def main():
         print("Error: OPENAI_API_KEY environment variable not set")
         return
 
+    # Initialize Tracing
+    initialize_tracing(
+        InitializeTracingOptions(
+            service_name="test-service",
+            version="1.0.0",
+            environment="production",
+            skip_global_context_manager_setup=False,
+            exporter_options=StatsigOTLPTraceExporterOptions(
+                sdk_key=os.environ.get("STATSIG_SDK_KEY"),
+            ),
+        )
+    )
+
     # Initialize StatsigAI
     StatsigAI.new_shared(
         statsig_source=StatsigCreateConfig(
-            sdk_key=os.environ.get("STATSIG_API_KEY"),
+            sdk_key=os.environ.get("STATSIG_SDK_KEY"),
         )
     )
     StatsigAI.shared().initialize()

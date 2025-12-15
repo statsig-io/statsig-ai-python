@@ -1,19 +1,23 @@
 import inspect
 import logging
 from typing import Any, Optional
-from opentelemetry import trace
-from opentelemetry.trace import SpanKind, StatusCode
+from opentelemetry.trace import SpanKind, StatusCode, Tracer
 
-from statsig_ai.wrappers.genai_attribute_helper import (
+from .genai_attribute_helper import (
     extract_genai_attributes,
     extract_opt_in_attributes,
     extract_oai_usage_attributes,
 )
+from ..otel.singleton import OtelSingleton
 from .configs import WrapOpenAIOptions
 from .span_telemetry import SpanTelemetry
 
 logger = logging.getLogger(__name__)
-tracer = trace.get_tracer("statsig-openai-proxy")
+
+
+def _get_tracer() -> Tracer:
+    return OtelSingleton.get_tracer_provider_static().get_tracer("statsig-openai-proxy")
+
 
 OTEL_OP_NAME_MAP = {
     "openai.chat.completions.create": "chat",
@@ -41,7 +45,7 @@ class BaseWrapper:
             self._operation_name, self._operation_name.replace("openai.", "")
         )
         span_name = f"{otel_name} {model}"
-        span = tracer.start_span(span_name, kind=SpanKind.CLIENT)
+        span = _get_tracer().start_span(span_name, kind=SpanKind.CLIENT)
         telemetry = SpanTelemetry(span, span_name, provider_name="openai")
 
         base_attrs = extract_genai_attributes(

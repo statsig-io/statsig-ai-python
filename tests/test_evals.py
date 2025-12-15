@@ -3,7 +3,6 @@ from pytest_httpserver import HTTPServer
 from statsig_ai import Eval, EvalScorerArgs, EvalDataRecord, EvalHook
 from statsig_ai.evals.eval_types import ScoreWithMetadata
 from mock_scrapi import MockScrapi
-import math
 
 
 def results_by_input(results):
@@ -618,7 +617,7 @@ def test_eval_scorer_error(eval_setup):
     )
 
     results = results_by_input(result.results)
-    print('DATA', results)
+    print("DATA", results)
     assert results["world"].scores["Grader"] == 1.0
     assert results["fail"].scores["Grader"] == 0.0
     assert results["fail"].error == False
@@ -663,7 +662,10 @@ def test_eval_scorer_with_metadata(eval_setup):
 
     def metadata_scorer(args: EvalScorerArgs[str, str]) -> dict:
         if args.output == args.expected:
-            return {"score": 1.0, "metadata": {"justification": "exact match", "confidence": "high"}}
+            return {
+                "score": 1.0,
+                "metadata": {"justification": "exact match", "confidence": "high"},
+            }
         else:
             return {"score": 0.0, "metadata": {"justification": "no match"}}
 
@@ -678,11 +680,11 @@ def test_eval_scorer_with_metadata(eval_setup):
     )
 
     results = results_by_input(result.results)
-    
+
     # Check that scores are ScoreWithMetadata objects with correct values
     world_score = results["world"].scores["Grader"]
     assert world_score == 1.0
-    
+
     test_score = results["test"].scores["Grader"]
     assert test_score == 0.0
 
@@ -690,14 +692,15 @@ def test_eval_scorer_with_metadata(eval_setup):
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     payload_results = results_by_input(payloads[0]["results"])
-    
+
     world_payload_score = payload_results["world"]["scores"]["Grader"]
     assert world_payload_score["score"] == 1.0
     assert world_payload_score["metadata"] == {"justification": "exact match", "confidence": "high"}
-    
+
     test_payload_score = payload_results["test"]["scores"]["Grader"]
     assert test_payload_score["score"] == 0.0
     assert test_payload_score["metadata"] == {"justification": "no match"}
+
 
 def test_eval_scorer_invalid_dict_without_score_key(eval_setup):
     mock_scrapi = eval_setup
@@ -1047,7 +1050,9 @@ def test_eval_summary_scorer_with_categories(eval_setup):
                 category_scores[category] = []
 
             category_scores[category].append(
-                sum(s for s in result.scores.values()) / len(result.scores) if result.scores else 0.0
+                sum(s for s in result.scores.values()) / len(result.scores)
+                if result.scores
+                else 0.0
             )
 
         summary = {}
@@ -1154,7 +1159,9 @@ def test_eval_summary_scorer_with_task_errors(eval_setup):
         avg_score = total_score / len(results) if results else 0.0
 
         success_scores = [
-            sum(s for s in r.scores.values()) / len(r.scores) for r in results if not r.error and r.scores
+            sum(s for s in r.scores.values()) / len(r.scores)
+            for r in results
+            if not r.error and r.scores
         ]
         avg_success_score = sum(success_scores) / len(success_scores) if success_scores else 0.0
 
