@@ -6,6 +6,8 @@ import asyncio
 from typing import Dict, Any, Optional
 from pytest_httpserver import HTTPServer
 
+from statsig_ai.otel.conventions import STATSIG_ATTR_SPAN_TYPE, StatsigSpanType
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from mock_scrapi import MockScrapi
@@ -311,6 +313,9 @@ TEST_CASES = [
 
 
 def validate_base_attributes(metadata: Dict[str, str], operation: str):
+    assert STATSIG_ATTR_SPAN_TYPE in metadata, "Missing statsig.span.type"
+    assert metadata[STATSIG_ATTR_SPAN_TYPE] == StatsigSpanType.GEN_AI
+
     assert "gen_ai.provider.name" in metadata, "Missing provider name"
     assert metadata["gen_ai.provider.name"] == "openai"
 
@@ -576,6 +581,9 @@ async def test_reasoning_tokens_gpt5_nano_responses(statsig_setup, is_stream):
 
     event = gen_ai_events[-1]
     metadata = event["metadata"]
+
+    assert STATSIG_ATTR_SPAN_TYPE in metadata, "Missing statsig.span.type"
+    assert metadata[STATSIG_ATTR_SPAN_TYPE] == StatsigSpanType.GEN_AI
 
     assert "gen_ai.provider.name" in metadata
     assert metadata["gen_ai.provider.name"] == "openai"
