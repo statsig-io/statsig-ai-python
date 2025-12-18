@@ -6,6 +6,8 @@ import time
 from opentelemetry.trace import Span, Status, StatusCode
 from statsig_python_core import Statsig, StatsigUser
 
+from statsig_ai.otel.statsig_context import get_statsig_span_attrs_from_context
+
 GEN_AI_EVENT_NAME = "statsig::gen_ai"
 PLACEHOLDER_STATSIG_USER = StatsigUser(user_id="statsig-ai-openai-wrapper")
 
@@ -33,6 +35,10 @@ class SpanTelemetry:
         ctx = span.get_span_context()
         self.metadata["span.trace_id"] = str(ctx.trace_id)
         self.metadata["span.span_id"] = str(ctx.span_id)
+
+        statsig_attrs = get_statsig_span_attrs_from_context()
+        if statsig_attrs:
+            self.metadata.update(statsig_attrs)
 
     def set_attributes(self, kv: Dict[str, Any]) -> None:
         for key, value in kv.items():

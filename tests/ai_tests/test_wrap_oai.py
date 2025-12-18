@@ -17,9 +17,13 @@ from statsig_ai import (
     StatsigOptions,
     StatsigAI,
     StatsigCreateConfig,
+    StatsigUser,
     WrapOpenAIOptions,
     GenAICaptureOptions,
+    StatsigContext,
+    statsig_context,
 )
+from statsig_ai.otel.conventions import STATSIG_ATTR_USER_ID, STATSIG_ATTR_CUSTOM_IDS
 from statsig_ai import wrap_openai
 from openai import OpenAI, AsyncOpenAI
 
@@ -605,3 +609,77 @@ async def test_reasoning_tokens_gpt5_nano_responses(statsig_setup, is_stream):
         assert "statsig.gen_ai.server.time_to_first_token_ms" in metadata
         ttft_ms = float(metadata["statsig.gen_ai.server.time_to_first_token_ms"])
         assert ttft_ms > 0, f"Time to first token should be positive, got {ttft_ms}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "client_type",
+    ["sync", "async"],
+    ids=["sync", "async"],
+)
+async def test_statsig_context_user_and_activity_on_spans(statsig_setup, client_type):
+    mock_scrapi = statsig_setup
+    mock_scrapi.reset()
+
+    user = StatsigUser(
+        user_id="test-user-123",
+        custom_ids={"company_id": "acme-corp", "team_id": "engineering"},
+    )
+    activity_id = "session-abc-456"
+
+    if client_type == "sync":
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    else:
+        client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    wrapped_client = wrap_openai(client)
+
+    with statsig_context(StatsigContext(user=user, activity_id=activity_id)):
+        if client_type == "async":
+            await wrapped_client.chat.completions.create(
+                model=TEST_MODEL,
+                messages=[{"role": "user", "content": "Say hello"}],
+            )
+        else:
+            wrapped_client.chat.completions.create(
+                model=TEST_MODEL,
+                messages=[{"role": "user", "content": "Say hello"}],
+            )
+
+    await asyncio.sleep(0.5)
+    StatsigAI.shared().flush_events()
+
+    events = mock_scrapi.get_logged_events()
+    gen_ai_events = [e for e in events if e.get("eventName") == "statsig::gen_ai"]
+
+    assert len(gen_ai_events) > 0, f"No gen_ai events logged. Total events: {len(events)}"
+
+    event = gen_ai_events[-1]
+    metadata = event["metadata"]
+
+    assert STATSIG_ATTR_USER_ID in metadata, f"Missing {STATSIG_ATTR_USER_ID} in metadata"
+    assert (
+        metadata[STATSIG_ATTR_USER_ID] == "test-user-123"
+    ), f"Expected user_id 'test-user-123', got '{metadata[STATSIG_ATTR_USER_ID]}'"
+
+    assert STATSIG_ATTR_CUSTOM_IDS in metadata, f"Missing {STATSIG_ATTR_CUSTOM_IDS} in metadata"
+    custom_ids = json.loads(metadata[STATSIG_ATTR_CUSTOM_IDS])
+
+    assert "company_id" in custom_ids, "Missing 'company_id' in custom_ids"
+    assert (
+        custom_ids["company_id"] == "acme-corp"
+    ), f"Expected company_id 'acme-corp', got '{custom_ids['company_id']}'"
+
+    assert "team_id" in custom_ids, "Missing 'team_id' in custom_ids"
+    assert (
+        custom_ids["team_id"] == "engineering"
+    ), f"Expected team_id 'engineering', got '{custom_ids['team_id']}'"
+
+    assert "statsig.activity_id" in custom_ids, "Missing 'statsig.activity_id' in custom_ids"
+    assert (
+        custom_ids["statsig.activity_id"] == "session-abc-456"
+    ), f"Expected activity_id 'session-abc-456', got '{custom_ids['statsig.activity_id']}'"
+
+    print(f"\n✅ test_statsig_context_user_and_activity_on_spans ({client_type}) PASSED")
+    print(f"  user_id: {metadata[STATSIG_ATTR_USER_ID]}")
+    print(f"  custom_ids: {custom_ids}")

@@ -4,6 +4,7 @@ from typing import Any, Optional
 from opentelemetry.trace import SpanKind, StatusCode, Tracer
 
 from statsig_ai.otel.conventions import STATSIG_ATTR_SPAN_TYPE, StatsigSpanType
+from statsig_ai.otel.statsig_context import set_statsig_span_attrs_from_context
 
 from .genai_attribute_helper import (
     extract_genai_attributes,
@@ -50,6 +51,8 @@ class BaseWrapper:
         span = _get_tracer().start_span(span_name, kind=SpanKind.CLIENT)
         telemetry = SpanTelemetry(span, span_name, provider_name="openai")
         telemetry.set_attributes({STATSIG_ATTR_SPAN_TYPE: StatsigSpanType.GEN_AI})
+
+        set_statsig_span_attrs_from_context(span)
 
         base_attrs = extract_genai_attributes(
             "openai", self._operation_name, model, kwargs, None, otel_operation_name=otel_name

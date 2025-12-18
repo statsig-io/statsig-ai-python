@@ -15,6 +15,12 @@ from .otel import (
     StatsigSpanProcessor,
     OtelSingleton,
     NoopOtelSingleton,
+    # Statsig Context
+    StatsigContext,
+    statsig_context,
+    get_statsig_context_from_otel_context,
+    get_statsig_span_attrs_from_context,
+    set_statsig_span_attrs_from_context,
 )
 
 __all__ = [
@@ -48,4 +54,10 @@ __all__ = [
     "StatsigOTLPTraceExporterOptions",
     "StatsigSpanProcessor",
     "OtelSingleton",
+    # Statsig Context
+    "StatsigContext",
+    "statsig_context",
+    "get_statsig_context_from_otel_context",
+    "get_statsig_span_attrs_from_context",
+    "set_statsig_span_attrs_from_context",
 ]
