@@ -18,7 +18,7 @@ test_deps = [
     "pytest",
     "pytest-httpserver",
     "werkzeug",
-    "statsig-python-core",
+    "statsig-python-core>=0.19.4",
     "pytest-asyncio",
     "openai",
 ]
@@ -45,7 +45,7 @@ setup(
     ],
     install_requires=[
         "requests",
-        "statsig-python-core",
+        "statsig-python-core>=0.19.4",
         "opentelemetry-api",
         "opentelemetry-sdk",
         "opentelemetry-exporter-otlp-proto-http",
@@ -56,5 +56,5 @@ setup(
     extras_require=extras,
     include_package_data=True,
     packages=find_packages(include=["statsig_ai", "statsig_ai.*"]),
-    python_requires=">=3.9",
+    python_requires=">=3.10",
 )

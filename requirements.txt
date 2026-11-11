@@ -1,4 +1,4 @@
-statsig-python-core
+statsig-python-core>=0.19.4
 setuptools
 opentelemetry-exporter-otlp-proto-http
 opentelemetry-sdk

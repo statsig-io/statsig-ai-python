@@ -1,4 +1,4 @@
-import json
+import copy
 import re
 from typing import Any, Dict, List, TypedDict
 from statsig_python_core import DynamicConfig
@@ -58,10 +58,7 @@ class PromptVersion:
 
     # pylint: disable=dangerous-default-value
     def get_workflow_body(self, fallback: Dict[str, Any] = {}) -> Dict[str, Any]:
-        workflow_body_json = self._prompt_variant.get_object_json(
-            "workflowBody", json.dumps(fallback)
-        )
-        return json.loads(workflow_body_json)
+        return self.get_object("workflowBody", fallback)
 
     def get_eval_model(self, fallback: str = "") -> str:
         return self._prompt_variant.get_string("evalModel", fallback)
@@ -79,18 +76,17 @@ class PromptVersion:
         return self._prompt_variant.get_bool(key, fallback)
 
     def get_array(self, key: str, fallback: list) -> list:
-        array_json = self._prompt_variant.get_array_json(key, json.dumps(fallback))
-        return json.loads(array_json)
+        # Core returns its own stored value (or the fallback itself), so copy it
+        # to keep callers from mutating the config or a shared default.
+        return copy.deepcopy(self._prompt_variant.get_array(key, fallback))
 
     def get_object(self, key: str, fallback: dict) -> dict:
-        object_json = self._prompt_variant.get_object_json(key, json.dumps(fallback))
-        return json.loads(object_json)
+        return copy.deepcopy(self._prompt_variant.get_object(key, fallback))
 
     def get_prompt_messages(self, params: PromptParams) -> List[PromptMessage]:
-        prompts_array_json = self._prompt_variant.get_array_json(
-            "prompts", json.dumps([{"role": "system", "content": ""}])
+        prompts = self._prompt_variant.get_array(
+            "prompts", [{"role": "system", "content": ""}]
         )
-        prompts = json.loads(prompts_array_json)
         regex = re.compile(r"{{\s*([^}]+)\s*}}")
 
         def replace_placeholders(content: str) -> str:

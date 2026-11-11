@@ -96,7 +96,7 @@ def _normalize_scorers(scorers: EvalScorer) -> ScorerFnMap[Input, Output]:
     scorers_dict = scorers if isinstance(scorers, dict) else {"Grader": scorers}
     for name, scorer in scorers_dict.items():
         if inspect.isclass(scorer):
-            scorers_dict[name] = scorer()
+            scorers_dict[name] = cast(Scorer[Input, Output], scorer())
     return scorers_dict
 
 

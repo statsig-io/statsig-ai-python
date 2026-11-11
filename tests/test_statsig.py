@@ -64,6 +64,28 @@ def test_get_prompt_get_live(statsig_setup):
     assert live_version.get_prompt_name() == "test_prompt"
 
 
+def test_get_prompt_get_live_objects_and_arrays(statsig_setup):
+    options, _ = statsig_setup
+    statsig_ai = StatsigAI(
+        statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
+    )
+    statsig_ai.initialize()
+    prompt = statsig_ai.get_prompt(StatsigUser("a-user"), "test_prompt")
+    statsig_ai.shutdown()
+
+    live_version = prompt.get_live()
+    assert live_version.get_prompt_messages({}) == [{"role": "system", "content": ""}]
+    assert live_version.get_workflow_body() == {}
+    assert live_version.get_object("missing", {"a": 1}) == {"a": 1}
+    assert live_version.get_array("missing", [1]) == [1]
+
+    # Mutating a returned value must not leak into the config
+    live_version.get_workflow_body()["mutated"] = True
+    live_version.get_array("prompts", [])[0]["content"] = "mutated"
+    assert live_version.get_workflow_body() == {}
+    assert live_version.get_array("prompts", []) == [{"role": "system", "content": ""}]
+
+
 def test_get_prompt_get_candicates(statsig_setup):
     options, _ = statsig_setup
     statsig_ai = StatsigAI(
