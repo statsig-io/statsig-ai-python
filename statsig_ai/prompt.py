@@ -33,6 +33,6 @@ def make_prompt(statsig: Statsig, name: str, paramStore, user: StatsigUser) -> P
         candidates_configs.append(config)
     return Prompt(
         name,
-        PromptVersion(live_config),
-        [PromptVersion(config) for config in candidates_configs],
+        PromptVersion(live_config, True),
+        [PromptVersion(config, False) for config in candidates_configs],
     )

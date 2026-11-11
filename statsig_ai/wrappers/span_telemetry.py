@@ -3,7 +3,7 @@ import json
 import logging
 import time
 
-from opentelemetry.trace import Span, Status, StatusCode
+from opentelemetry.trace import Span, Status, StatusCode, format_span_id, format_trace_id
 from statsig_python_core import Statsig, StatsigUser
 
 from statsig_ai.otel.statsig_context import get_statsig_span_attrs_from_context
@@ -33,8 +33,8 @@ class SpanTelemetry:
 
         self.metadata["gen_ai.provider.name"] = provider_name
         ctx = span.get_span_context()
-        self.metadata["span.trace_id"] = str(ctx.trace_id)
-        self.metadata["span.span_id"] = str(ctx.span_id)
+        self.metadata["span.trace_id"] = format_trace_id(ctx.trace_id)
+        self.metadata["span.span_id"] = format_span_id(ctx.span_id)
 
         statsig_attrs = get_statsig_span_attrs_from_context()
         if statsig_attrs:

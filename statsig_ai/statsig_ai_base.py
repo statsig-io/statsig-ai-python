@@ -1,9 +1,12 @@
-from typing import Any, Optional, Union
+from typing import Any, Dict, Optional, Union
 
+from opentelemetry import trace
 from statsig_python_core import Statsig, StatsigOptions
 from .prompt import make_prompt, PromptEvaluationOptions, Prompt
 from .ai_eval_grade_data import AIEvalGradeData
 from .prompt_version import PromptVersion
+from .otel.conventions import STATSIG_ATTR_ACTIVITY_ID
+from .otel.singleton import OtelSingleton
 
 
 class StatsigCreateConfig:
@@ -42,10 +45,12 @@ class StatsigAIInstance:
     def flush_events(self) -> None:
         if self._owns_statsig_instance:
             self._statsig.flush_events().wait()
+        OtelSingleton.flush_instance()
 
     def shutdown(self) -> None:
         if self._owns_statsig_instance:
             self._statsig.shutdown().wait()
+        OtelSingleton.flush_instance()
 
     def get_statsig(self) -> Statsig:
         return self._statsig
@@ -109,16 +114,40 @@ class StatsigAIInstance:
             )
             return
 
+        activity_id = eval_data.get("activity_id")
+        if activity_id:
+            user.custom_ids = {**(user.custom_ids or {}), STATSIG_ATTR_ACTIVITY_ID: activity_id}
+
+        trace_id = eval_data.get("trace_id")
+        span_id = eval_data.get("span_id")
+        if not trace_id and not span_id:
+            span_context = trace.get_current_span().get_span_context()
+            if span_context.is_valid:
+                trace_id = trace.format_trace_id(span_context.trace_id)
+                span_id = trace.format_span_id(span_context.span_id)
+
+        metadata: Dict[str, str] = {
+            "score": str(score),
+            "session_id": eval_data.get("session_id") or "",
+            "version_name": prompt_version.get_name(),
+            "version_id": prompt_version.get_id(),
+            "grader_name": grader_name,
+            "ai_config_name": prompt_version.get_prompt_name(),
+            "is_live": "true" if prompt_version.is_live_for_user else "false",
+            "source": "sdk",
+        }
+        if trace_id:
+            metadata["trace_id"] = trace_id
+        if span_id:
+            metadata["span_id"] = span_id
+        reasoning = eval_data.get("reasoning")
+        if reasoning:
+            metadata["reasoning"] = reasoning
+        metadata.update(eval_data.get("metadata") or {})
+
         self._statsig.log_event(
             user,
             "statsig::eval_result",
             prompt_version.get_prompt_name(),
-            {
-                "score": str(score),
-                "session_id": eval_data.get("session_id", ""),
-                "version_name": prompt_version.get_name(),
-                "version_id": prompt_version.get_id(),
-                "grader_id": grader_name,
-                "ai_config_name": prompt_version.get_prompt_name(),
-            },
+            metadata,
         )

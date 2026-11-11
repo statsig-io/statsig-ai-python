@@ -13,7 +13,7 @@ class PromptMessage(TypedDict):
 
 
 class PromptVersion:
-    def __init__(self, prompt_variant: DynamicConfig):
+    def __init__(self, prompt_variant: DynamicConfig, is_live_for_user: bool = False):
         self.name: str = prompt_variant.get_string("name", "")
         self._type: str = prompt_variant.get_string("type", "")
         self._ai_config_name: str = prompt_variant.get_string("aiConfigName", "")
@@ -22,6 +22,7 @@ class PromptVersion:
         self._id: str = parts[1] if len(parts) > 1 else ""
 
         self._prompt_variant = prompt_variant
+        self.is_live_for_user = is_live_for_user
 
     def get_name(self) -> str:
         return self.name
