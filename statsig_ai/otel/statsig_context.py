@@ -52,9 +52,7 @@ def get_statsig_span_attrs_from_context(
     attrs: Dict[str, str] = {}
 
     if statsig_ctx.user is not None:
-        user_id = getattr(statsig_ctx.user, "user_id", None)
-        if user_id is not None:
-            attrs[STATSIG_ATTR_USER_ID] = user_id
+        attrs[STATSIG_ATTR_USER_ID] = getattr(statsig_ctx.user, "user_id", None) or "unknown"
 
     custom_ids: Dict[str, str] = {}
     if statsig_ctx.user is not None:
@@ -64,7 +62,7 @@ def get_statsig_span_attrs_from_context(
         custom_ids[STATSIG_ATTR_ACTIVITY_ID] = statsig_ctx.activity_id
 
     if custom_ids:
-        attrs[STATSIG_ATTR_CUSTOM_IDS] = json.dumps(custom_ids)
+        attrs[STATSIG_ATTR_CUSTOM_IDS] = json.dumps(custom_ids, separators=(",", ":"))
 
     return attrs if attrs else None
 

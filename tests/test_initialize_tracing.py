@@ -114,6 +114,20 @@ def test_populates_resource_attributes_from_options():
     assert attrs.get("service.name") == "resource-service"
     assert attrs.get("service.version") == "2.0.0"
     assert attrs.get("env") == "staging"
+    assert attrs.get("deployment.environment.name") == "staging"
+
+
+def test_omits_deployment_environment_when_no_environment_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("PYTHON_ENV", raising=False)
+
+    result = initialize_tracing(InitializeTracingOptions(skip_global_context_manager_setup=True))
+
+    attrs = result.provider.resource.attributes  # type: ignore[attr-defined]
+
+    assert "env" not in attrs
+    assert "deployment.environment.name" not in attrs
 
 
 def test_falls_back_to_environment_variables_for_resource_attributes(
@@ -132,3 +146,4 @@ def test_falls_back_to_environment_variables_for_resource_attributes(
 
     assert attrs.get("service.name") == "env-service-name"
     assert attrs.get("env") == "ci"
+    assert attrs.get("deployment.environment.name") == "ci"

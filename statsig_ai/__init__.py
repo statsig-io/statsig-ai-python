@@ -21,6 +21,13 @@ from .otel import (
     get_statsig_context_from_otel_context,
     get_statsig_span_attrs_from_context,
     set_statsig_span_attrs_from_context,
+    # User Context
+    statsig_user_context,
+    # Environment
+    statsig_environment,
+    # Incoming Trace Context
+    incoming_trace_context,
+    IncomingHeaders,
 )
 
 __all__ = [
@@ -60,4 +67,11 @@ __all__ = [
     "get_statsig_context_from_otel_context",
     "get_statsig_span_attrs_from_context",
     "set_statsig_span_attrs_from_context",
+    # User Context
+    "statsig_user_context",
+    # Environment
+    "statsig_environment",
+    # Incoming Trace Context
+    "incoming_trace_context",
+    "IncomingHeaders",
 ]

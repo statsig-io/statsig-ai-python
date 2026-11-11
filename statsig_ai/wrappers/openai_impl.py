@@ -1,10 +1,11 @@
 import inspect
 import logging
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 from opentelemetry.trace import SpanKind, StatusCode, Tracer
 
 from statsig_ai.otel.conventions import STATSIG_ATTR_SPAN_TYPE, StatsigSpanType
-from statsig_ai.otel.statsig_context import set_statsig_span_attrs_from_context
+from statsig_ai.otel.environment_context import get_environment_span_attrs_from_context
+from statsig_ai.otel.statsig_context import get_statsig_span_attrs_from_context
 
 from .genai_attribute_helper import (
     extract_genai_attributes,
@@ -48,11 +49,16 @@ class BaseWrapper:
             self._operation_name, self._operation_name.replace("openai.", "")
         )
         span_name = f"{otel_name} {model}"
-        span = _get_tracer().start_span(span_name, kind=SpanKind.CLIENT)
-        telemetry = SpanTelemetry(span, span_name, provider_name="openai")
-        telemetry.set_attributes({STATSIG_ATTR_SPAN_TYPE: StatsigSpanType.GEN_AI})
 
-        set_statsig_span_attrs_from_context(span)
+        # Like the Node SDK's startGenAISpan, the span starts with the statsig_context and
+        # statsig_environment attributes, and the statsig::gen_ai event gets them too.
+        statsig_attrs: Dict[str, str] = {STATSIG_ATTR_SPAN_TYPE: StatsigSpanType.GEN_AI}
+        statsig_attrs.update(get_statsig_span_attrs_from_context() or {})
+        statsig_attrs.update(get_environment_span_attrs_from_context() or {})
+
+        span = _get_tracer().start_span(span_name, kind=SpanKind.CLIENT, attributes=statsig_attrs)
+        telemetry = SpanTelemetry(span, span_name, provider_name="openai")
+        telemetry.set_attributes(statsig_attrs)
 
         base_attrs = extract_genai_attributes(
             "openai", self._operation_name, model, kwargs, None, otel_operation_name=otel_name

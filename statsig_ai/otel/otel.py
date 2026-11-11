@@ -9,6 +9,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.sdk.resources import Resource
 
+from .conventions import ATTR_DEPLOYMENT_ENVIRONMENT_NAME
 from .exporter import StatsigOTLPTraceExporter, StatsigOTLPTraceExporterOptions
 from .processor import StatsigSpanProcessor
 from .singleton import OtelSingleton
@@ -58,12 +59,14 @@ def initialize_tracing(
                 "You can skip this setup by passing skip_global_context_manager_setup=True."
             )
 
+    environment = options.environment or os.getenv("PYTHON_ENV")
     trace_components = _create_trace_components(
         exporter_options=options.exporter_options,
         resources={
             "service.name": options.service_name or os.getenv("OTEL_SERVICE_NAME"),
             "service.version": options.version,
-            "env": options.environment or os.getenv("PYTHON_ENV"),
+            ATTR_DEPLOYMENT_ENVIRONMENT_NAME: environment,
+            "env": environment,
         },
     )
 
