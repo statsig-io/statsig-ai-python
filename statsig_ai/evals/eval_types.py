@@ -78,7 +78,8 @@ OnlyScore = Union[int, float, bool]
 @dataclass
 class ScoreWithMetadata(SerializableDataClass):
     score: OnlyScore
-    metadata: Optional[Dict[str, str]] = None
+    # Values that aren't strings are sent to Statsig as JSON strings.
+    metadata: Optional[Dict[str, Any]] = None
 
 Score = Union[OnlyScore, ScoreWithMetadata]
 
@@ -88,6 +89,7 @@ class EvalScorerArgs(SerializableDataClass, Generic[Input, Output]):
     input: Input
     output: Output
     expected: Optional[Output] = None
+    category: Optional[Union[Sequence[str], str]] = None
 
 
 class SyncScorer(Protocol, Generic[Input, Output]):
@@ -152,6 +154,9 @@ class EvalResult(SerializableDataClass, Generic[Input, Output]):
 # Eval Task Type
 # ================================
 
+# Parameter values are passed to tasks as is, except a pydantic
+# `Field(default=...)` or `Field(default_factory=...)`, which is resolved to its
+# default before any task runs.
 EvalParameters = Dict[str, Any]
 
 

@@ -1,6 +1,11 @@
+import asyncio
+import sys
+
 import pytest
+from pydantic import Field
 from pytest_httpserver import HTTPServer
 from statsig_ai import Eval, EvalScorerArgs, EvalDataRecord, EvalHook
+from statsig_ai.evals import EvalAsync
 from statsig_ai.evals.eval_types import ScoreWithMetadata
 from mock_scrapi import MockScrapi
 
@@ -56,6 +61,18 @@ def eval_setup(httpserver: HTTPServer, monkeypatch):
     monkeypatch.setattr(requests, "post", intercepted_post)
 
     yield mock_scrapi
+
+
+@pytest.fixture(params=["Eval", "EvalAsync"])
+def run_eval(request):
+    """Runs an eval through Eval() or EvalAsync()."""
+    if request.param == "Eval":
+        return Eval
+
+    def run_eval_async(name, **kwargs):
+        return asyncio.run(EvalAsync(name, **kwargs))
+
+    return run_eval_async
 
 
 def test_eval_basic_string(eval_setup):
@@ -240,9 +257,10 @@ def test_eval_dict_input(eval_setup):
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     payload_results = results_by_input(payloads[0]["results"])
-    assert payload_results[dict_key]["input"] == {"name": "Alice", "age": 30}
-    assert payload_results[dict_key]["output"] == "Hello Alice"
-    assert payload_results[dict_key]["scores"]["Grader"]["score"] == 1.0
+    payload_key = '{"name":"Alice","age":30}'
+    assert payload_results[payload_key]["input"] == payload_key
+    assert payload_results[payload_key]["output"] == "Hello Alice"
+    assert payload_results[payload_key]["scores"]["Grader"]["score"] == 1.0
 
 
 def test_eval_int_input(eval_setup):
@@ -272,12 +290,14 @@ def test_eval_int_input(eval_setup):
     payloads = mock_scrapi.get_eval_payloads()
     assert len(payloads) == 1
     payload_results = results_by_input(payloads[0]["results"])
-    assert payload_results[5]["input"] == 5
-    assert payload_results[5]["output"] == 10
-    assert payload_results[5]["scores"]["Grader"]["score"] == 1.0
-    assert payload_results[3]["input"] == 3
-    assert payload_results[3]["output"] == 6
-    assert payload_results[3]["scores"]["Grader"]["score"] == 1.0
+    assert payload_results["5"]["input"] == "5"
+    assert payload_results["5"]["output"] == "10"
+    assert payload_results["5"]["expected"] == "10"
+    assert payload_results["5"]["scores"]["Grader"]["score"] == 1.0
+    assert payload_results["3"]["input"] == "3"
+    assert payload_results["3"]["output"] == "6"
+    assert payload_results["3"]["expected"] == "6"
+    assert payload_results["3"]["scores"]["Grader"]["score"] == 1.0
 
 
 def test_eval_dataclass_records(eval_setup):
@@ -584,6 +604,7 @@ def test_eval_task_error(eval_setup):
     results = results_by_input(result.results)
     assert results["world"].output == "Hello world"
     assert results["world"].error == False
+    assert results["fail"].output == "[Error]"
     assert results["fail"].error == True
     assert results["fail"].scores["Grader"] == 0.0
     assert result.metadata.error == True
@@ -828,7 +849,7 @@ def test_eval_with_parameters(eval_setup):
         "prefix": "Hi",
         "suffix": "!",
         "number": "123",
-        "object": '{"a": "b"}',
+        "object": '{"a":"b"}',
     }
 
 
@@ -1264,3 +1285,349 @@ def test_eval_summary_scorer_throws_during_computation(eval_setup):
     assert payload_results["test"]["output"] == "Hello test"
     assert payload_results["test"]["scores"]["Grader"]["score"] == 1.0
     assert "summaryScores" not in payloads[0]
+
+
+def _sync_task(fn):
+    return fn
+
+
+def _async_task(fn):
+    async def task(input):
+        return fn(input)
+
+    return task
+
+
+@pytest.mark.parametrize("wrap_task", [_sync_task, _async_task], ids=["sync", "async"])
+def test_eval_task_returning_error_string_is_not_a_failure(eval_setup, run_eval, wrap_task):
+    mock_scrapi = eval_setup
+
+    result = run_eval(
+        "test_task_returns_error_string",
+        data=[{"input": "world", "expected": "Error"}],
+        task=wrap_task(lambda input: "Error"),
+        scorer=lambda args: args.output == args.expected,
+    )
+
+    record = result.results[0]
+    assert record.output == "Error"
+    assert record.error == False
+    assert record.scores == {"Grader": 1.0}
+    assert result.metadata.error == False
+
+    payload_record = mock_scrapi.get_eval_payloads()[0]["results"][0]
+    assert payload_record["output"] == "Error"
+    assert payload_record["error"] == False
+    assert payload_record["scores"] == {"Grader": {"score": 1.0}}
+
+
+@pytest.mark.parametrize("wrap_task", [_sync_task, _async_task], ids=["sync", "async"])
+def test_eval_task_that_raises_scores_zero_on_every_scorer(eval_setup, run_eval, wrap_task, caplog):
+    mock_scrapi = eval_setup
+    scorer_calls = []
+
+    def failing_task(input):
+        raise ValueError("Task failed")
+
+    def scorer(args):
+        scorer_calls.append(args)
+        return 1.0
+
+    result = run_eval(
+        "test_task_raises",
+        data=[{"input": "boom", "expected": "Anything"}],
+        task=wrap_task(failing_task),
+        scorer={"exact": scorer, "length": scorer},
+    )
+
+    record = result.results[0]
+    assert record.input == "boom"
+    assert record.expected == "Anything"
+    assert record.output == "[Error]"
+    assert record.error == True
+    assert record.scores == {"exact": 0.0, "length": 0.0}
+    assert result.metadata.error == True
+    assert scorer_calls == []
+    assert "Task failed" in caplog.text
+
+    payload_record = mock_scrapi.get_eval_payloads()[0]["results"][0]
+    assert payload_record == {
+        "input": "boom",
+        "expected": "Anything",
+        "output": "[Error]",
+        "error": True,
+        "scores": {"exact": {"score": 0.0}, "length": {"score": 0.0}},
+    }
+
+
+def test_eval_sends_non_string_values_as_json_strings(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+
+    result = run_eval(
+        "test_non_string_values",
+        data=[
+            {"input": {"question": "Où?"}, "expected": 3},
+            {"input": [1, 2], "expected": {"answer": [1, 2]}},
+            {"input": 2.5, "expected": [2.5]},
+        ],
+        task=lambda input: {"answer": input} if isinstance(input, list) else [input],
+        scorer=lambda args: 1,
+    )
+
+    results = {str(r.input): r for r in result.results}
+    assert results["{'question': 'Où?'}"].input == {"question": "Où?"}
+    assert results["{'question': 'Où?'}"].output == [{"question": "Où?"}]
+    assert results["{'question': 'Où?'}"].expected == 3
+    assert results["[1, 2]"].output == {"answer": [1, 2]}
+    assert results["2.5"].output == [2.5]
+
+    payload_results = {r["input"]: r for r in mock_scrapi.get_eval_payloads()[0]["results"]}
+    assert payload_results['{"question":"Où?"}']["output"] == '[{"question":"Où?"}]'
+    assert payload_results['{"question":"Où?"}']["expected"] == "3"
+    assert payload_results["[1,2]"]["output"] == '{"answer":[1,2]}'
+    assert payload_results["[1,2]"]["expected"] == '{"answer":[1,2]}'
+    assert payload_results["2.5"]["output"] == "[2.5]"
+    assert payload_results["2.5"]["expected"] == "[2.5]"
+
+
+def test_eval_sends_values_that_are_not_json_as_text(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+
+    class Answer:
+        def __str__(self):
+            return "Answer(42)"
+
+    run_eval(
+        "test_values_not_json",
+        data=[{"input": "q"}],
+        task=lambda input: Answer(),
+        scorer=lambda args: 1,
+    )
+
+    payload_record = mock_scrapi.get_eval_payloads()[0]["results"][0]
+    assert payload_record["output"] == "Answer(42)"
+
+
+def test_eval_sends_empty_output_when_task_returns_none(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+
+    result = run_eval(
+        "test_none_output",
+        data=[{"input": "Foo"}],
+        task=lambda input: None,
+        scorer=lambda args: 1,
+    )
+
+    assert result.results[0].output is None
+    assert result.results[0].error == False
+
+    payload_record = mock_scrapi.get_eval_payloads()[0]["results"][0]
+    assert payload_record["input"] == "Foo"
+    assert payload_record["output"] == ""
+    assert "expected" not in payload_record
+
+
+def test_eval_sends_non_string_score_metadata_as_strings(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+
+    def scorer(args):
+        return {
+            "score": 1,
+            "metadata": {
+                "reasoning": "Greets Foo by name",
+                "confidence": 0.9,
+                "tags": ["greeting"],
+                "details": {"exact": True},
+                "passed": True,
+            },
+        }
+
+    def scorer_with_metadata_object(args):
+        return ScoreWithMetadata(score=True, metadata={"tokens": 12})
+
+    run_eval(
+        "test_score_metadata",
+        data=[{"input": "Foo"}],
+        task=lambda input: "Hello " + input,
+        scorer={"Grader": scorer, "Tokens": scorer_with_metadata_object},
+    )
+
+    scores = mock_scrapi.get_eval_payloads()[0]["results"][0]["scores"]
+    assert scores["Grader"] == {
+        "score": 1.0,
+        "metadata": {
+            "reasoning": "Greets Foo by name",
+            "confidence": "0.9",
+            "tags": '["greeting"]',
+            "details": '{"exact":true}',
+            "passed": "true",
+        },
+    }
+    assert scores["Tokens"] == {"score": 1.0, "metadata": {"tokens": "12"}}
+
+
+def test_eval_passes_category_to_scorers(eval_setup, run_eval):
+    scorer_args = []
+
+    def scorer(args: EvalScorerArgs[str, str]) -> bool:
+        scorer_args.append(args)
+        return True
+
+    run_eval(
+        "test_scorer_category",
+        data=[
+            {"input": "a", "expected": "A", "category": "letters"},
+            {"input": "b", "category": ["letters", "lowercase"]},
+            {"input": "c"},
+        ],
+        task=lambda input: input.upper(),
+        scorer=scorer,
+    )
+
+    by_input = {args.input: args for args in scorer_args}
+    assert by_input["a"] == EvalScorerArgs(
+        input="a", output="A", expected="A", category="letters"
+    )
+    assert by_input["b"].category == ["letters", "lowercase"]
+    assert by_input["b"].expected is None
+    assert by_input["c"].category is None
+
+
+def test_eval_resolves_pydantic_parameter_defaults(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+    hook_parameters = []
+
+    def task(input: str, hook: EvalHook) -> str:
+        hook_parameters.append(hook.parameters)
+        return f"{hook.parameters['prefix']} {input}{hook.parameters['suffix']}"
+
+    run_eval(
+        "test_pydantic_parameters",
+        data=[{"input": "world", "expected": "Hi world!"}],
+        task=task,
+        scorer=lambda args: args.output == args.expected,
+        parameters={
+            "prefix": Field(default="Hi"),
+            "suffix": "!",
+            "count": Field(default=123),
+            "config": Field(default_factory=lambda: {"nested": "value"}),
+            "tags": ["a", "b"],
+        },
+    )
+
+    assert hook_parameters == [
+        {
+            "prefix": "Hi",
+            "suffix": "!",
+            "count": 123,
+            "config": {"nested": "value"},
+            "tags": ["a", "b"],
+        }
+    ]
+
+    payload = mock_scrapi.get_eval_payloads()[0]
+    assert payload["results"][0]["output"] == "Hi world!"
+    assert payload["parameters"] == {
+        "prefix": "Hi",
+        "suffix": "!",
+        "count": "123",
+        "config": '{"nested":"value"}',
+        "tags": '["a","b"]',
+    }
+
+
+def test_eval_passes_plain_parameters_to_hooks(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+    hook_parameters = []
+
+    def task(input: str, hook: EvalHook) -> str:
+        hook_parameters.append(hook.parameters)
+        return input
+
+    run_eval(
+        "test_plain_parameters",
+        data=[{"input": "world"}],
+        task=task,
+        scorer=lambda args: 1,
+        parameters={"model": "gpt-4o", "temperature": 0.2, "options": {"stream": False}},
+    )
+
+    assert hook_parameters == [
+        {"model": "gpt-4o", "temperature": 0.2, "options": {"stream": False}}
+    ]
+    assert mock_scrapi.get_eval_payloads()[0]["parameters"] == {
+        "model": "gpt-4o",
+        "temperature": "0.2",
+        "options": '{"stream":false}',
+    }
+
+
+def test_eval_plain_parameters_work_without_pydantic(eval_setup, run_eval, monkeypatch):
+    mock_scrapi = eval_setup
+    # A None entry makes `from pydantic.fields import ...` raise ImportError.
+    monkeypatch.setitem(sys.modules, "pydantic.fields", None)
+    hook_parameters = []
+
+    def task(input: str, hook: EvalHook) -> str:
+        hook_parameters.append(hook.parameters)
+        return input
+
+    run_eval(
+        "test_parameters_without_pydantic",
+        data=[{"input": "world"}],
+        task=task,
+        scorer=lambda args: 1,
+        parameters={"prefix": "Hi", "count": 3},
+    )
+
+    assert hook_parameters == [{"prefix": "Hi", "count": 3}]
+    assert mock_scrapi.get_eval_payloads()[0]["parameters"] == {"prefix": "Hi", "count": "3"}
+
+
+def test_eval_pydantic_parameter_without_default_fails_before_any_task(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+    task_inputs = []
+
+    with pytest.raises(ValueError, match="Parameter 'prefix' needs a default value"):
+        run_eval(
+            "test_pydantic_parameter_without_default",
+            data=[{"input": "world"}],
+            task=lambda input: task_inputs.append(input),
+            scorer=lambda args: 1,
+            parameters={"prefix": Field()},
+        )
+
+    assert task_inputs == []
+    assert mock_scrapi.get_eval_payloads() == []
+
+
+def test_eval_results_keep_the_data_order(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+
+    async def task(input):
+        # Later records finish first, so completion order is the reverse of the data.
+        await asyncio.sleep(0.01 * (3 - int(input)))
+        return input
+
+    result = run_eval(
+        "test_result_order",
+        data=[{"input": "0"}, {"input": "1"}, {"input": "2"}],
+        task=task,
+        scorer=lambda args: 1.0,
+    )
+
+    assert [r.input for r in result.results] == ["0", "1", "2"]
+    payload = mock_scrapi.get_eval_payloads()[0]
+    assert [r["input"] for r in payload["results"]] == ["0", "1", "2"]
+
+
+def test_eval_task_gets_empty_parameters_without_parameters(eval_setup, run_eval):
+    hook_parameters = []
+
+    def task(input, hook):
+        hook_parameters.append(hook.parameters)
+        return input
+
+    run_eval("test_empty_parameters", data=[{"input": "a"}], task=task, scorer=lambda args: 1.0)
+
+    assert hook_parameters == [{}]

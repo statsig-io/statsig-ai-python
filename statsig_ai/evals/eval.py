@@ -13,6 +13,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Tuple,
     TypeVar,
     Union,
     cast,
@@ -22,6 +23,7 @@ import json
 import requests
 from tqdm.auto import tqdm
 
+from .serializable_data_class import SerializableDataClass
 from .eval_types import (
     EvalDataRecord,
     EvalHook,
@@ -48,6 +50,9 @@ from .eval_types import (
 T = TypeVar("T")
 
 _statsig_async_context_warning_shown = False
+
+# Output recorded for a record whose task failed, as in the Node SDK.
+_TASK_ERROR_OUTPUT = "[Error]"
 
 
 async def to_async_iter(iterable: Iterable[T]) -> AsyncIterator[T]:
@@ -116,6 +121,63 @@ def _normalize_score_value(score_value: Score) -> float:
         return 0.0
 
 
+def _resolve_parameters(parameters: Optional[EvalParameters]) -> EvalParameters:
+    """
+    Resolve each pydantic field to its default. Other values are kept as is. Without
+    parameters, tasks get an empty dict, as in the Node SDK.
+    """
+    if parameters is None:
+        return {}
+    try:
+        from pydantic.fields import FieldInfo  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return dict(parameters)
+
+    resolved: EvalParameters = {}
+    for param, value in parameters.items():
+        if isinstance(value, FieldInfo):
+            if value.is_required():
+                raise ValueError(f"[Statsig] Parameter '{param}' needs a default value.")
+            resolved[param] = value.get_default(call_default_factory=True)
+        else:
+            resolved[param] = value
+    return resolved
+
+
+def _stringify_payload_value(value: Any) -> str:
+    """The API only accepts strings for these values, so others are sent as JSON."""
+    if isinstance(value, str):
+        return value
+    try:
+        # Compact and unescaped, as JSON.stringify writes it in the Node SDK.
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _serialize_score(score: ScoreWithMetadata) -> Dict[str, Any]:
+    serialized: Dict[str, Any] = {"score": score.score}
+    if score.metadata is not None:
+        serialized["metadata"] = {
+            key: _stringify_payload_value(value) for key, value in score.metadata.items()
+        }
+    return serialized
+
+
+def _serialize_record(record: EvalResultRecordWithMetadata[Input, Output]) -> Dict[str, Any]:
+    serialized: Dict[str, Any] = {
+        "input": "" if record.input is None else _stringify_payload_value(record.input),
+        "output": "" if record.output is None else _stringify_payload_value(record.output),
+        "scores": {name: _serialize_score(score) for name, score in record.scores.items()},
+        "error": bool(record.error),
+    }
+    if record.expected is not None:
+        serialized["expected"] = _stringify_payload_value(record.expected)
+    if record.category is not None:
+        serialized["category"] = SerializableDataClass._serialize_value(record.category)
+    return serialized
+
+
 def _send_eval_results(
     name: str,
     records: List[EvalResultRecordWithMetadata[Input, Output]],
@@ -127,27 +189,24 @@ def _send_eval_results(
     """Send eval results to Statsig API (synchronous, using requests)."""
 
     url = f"https://api.statsig.com/console/v1/evals/send_results/{urllib.parse.quote(name)}"
-    record_as_dicts = []
-    try:
-        record_as_dicts = [record.to_dict() for record in records]
-    except Exception as err:
-        logging.warning("[Statsig] Failed to convert records to dicts: %s", err)
-        record_as_dicts = []
-
-    payload: Dict[str, Any] = {"results": record_as_dicts}
-    if eval_run_name:
-        payload["name"] = eval_run_name
-    if summary_scores:
-        payload["summaryScores"] = summary_scores
-    if parameters:
-        payload["parameters"] = {
-            param: value if isinstance(value, str) else json.dumps(value)
-            for param, value in parameters.items()
-        }
     headers = {
         "Content-Type": "application/json",
         "STATSIG-API-KEY": api_key,
     }
+
+    try:
+        payload: Dict[str, Any] = {"results": [_serialize_record(record) for record in records]}
+        if eval_run_name:
+            payload["name"] = eval_run_name
+        if summary_scores:
+            payload["summaryScores"] = summary_scores
+        if parameters:
+            payload["parameters"] = {
+                param: _stringify_payload_value(value) for param, value in parameters.items()
+            }
+    except Exception as err:
+        logging.error("[Statsig] Failed to serialize eval results: %s", err)
+        return
 
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -185,7 +244,8 @@ async def _run_task(
     task: EvalTask[Input, Output],
     input_value: Input,
     hook: EvalHook,
-) -> Output:
+) -> Tuple[Output, bool]:
+    """Run the task on one input. Returns the output and whether the task failed."""
     sig = inspect.signature(task)
     params = list(sig.parameters.values())
     num_args = len(params)
@@ -199,29 +259,34 @@ async def _run_task(
 
     try:
         if inspect.iscoroutinefunction(task):
-            return await task(*args)
+            return await task(*args), False
 
         event_loop = asyncio.get_event_loop()
 
         def sync_call() -> Output:
             return task(*args)  # type: ignore
 
-        return await event_loop.run_in_executor(None, sync_call)
+        return await event_loop.run_in_executor(None, sync_call), False
     except Exception as err:
         logging.warning("[Statsig] Task failed: %s | input=%r", err, input_value)
-        return cast(Output, "Error")
+        return cast(Output, _TASK_ERROR_OUTPUT), True
 
 
 async def _run_scorer(
     scorer_name: str,
     scorer: Scorer[Input, Output],
     output: Output,
-    expected: Optional[Output],
-    input_value: Input,
+    data_record: EvalDataRecord[Input, Output],
 ) -> ScoreWithMetadata:
     """Run a single scorer and return ScoreWithMetadata."""
+    input_value = data_record.input
     try:
-        args = EvalScorerArgs(input=input_value, output=output, expected=expected)
+        args = EvalScorerArgs(
+            input=input_value,
+            output=output,
+            expected=data_record.expected,
+            category=data_record.category,
+        )
 
         # Check for AsyncScorer protocol (has a score method)
         if hasattr(scorer, "score") and callable(getattr(scorer, "score", None)):
@@ -294,11 +359,11 @@ async def _run_task_and_score_one_record(
     - If task errors: all scores are 0 and error flag is set
     - If a scorer errors: that score is "0" (handled in _run_scorer)
     """
-    output: Output = await _run_task(
+    output, task_failed = await _run_task(
         task, data_record.input, EvalHook(parameters=parameters, category=data_record.category)
     )
 
-    if output == "Error":
+    if task_failed:
         return EvalResultRecordWithMetadata(
             input=data_record.input,
             expected=data_record.expected,
@@ -309,7 +374,7 @@ async def _run_task_and_score_one_record(
         )
 
     scorer_tasks = [
-        _run_scorer(scorer_name, scorer_fn, output, data_record.expected, data_record.input)
+        _run_scorer(scorer_name, scorer_fn, output, data_record)
         for scorer_name, scorer_fn in scorers.items()
     ]
     score_results = await asyncio.gather(*scorer_tasks)
@@ -375,22 +440,28 @@ async def _run_eval_helper(
     async for record in data_iterator:
         records.append(record)
 
+    resolved_parameters = _resolve_parameters(parameters)
+
     tasks: List[asyncio.Task[EvalResultRecordWithMetadata[Input, Output]]] = []
 
     for record in records:
         tasks.append(
             asyncio.create_task(
-                _run_task_and_score_one_record(task, normalized_scorers, record, parameters)
+                _run_task_and_score_one_record(
+                    task, normalized_scorers, record, resolved_parameters
+                )
             )
         )
 
-    results: List[EvalResultRecordWithMetadata[Input, Output]] = []
     for completed_task in tqdm(
         asyncio.as_completed(tasks),
         total=len(tasks),
         desc=f"Running eval: {name}",
     ):
-        results.append(await completed_task)
+        await completed_task
+
+    # The progress bar follows completion, but results keep the data's order, as in the Node SDK.
+    results: List[EvalResultRecordWithMetadata[Input, Output]] = [t.result() for t in tasks]
 
     any_error = any(r.error for r in results)
 
@@ -398,7 +469,9 @@ async def _run_eval_helper(
 
     summary_scores = _run_summary_scorer(summary_score_fn, results_without_metadata)
 
-    _send_eval_results(name, results, api_key, eval_run_name, summary_scores, parameters)
+    _send_eval_results(
+        name, results, api_key, eval_run_name, summary_scores, resolved_parameters
+    )
 
     return EvalResult(
         results=results_without_metadata,
@@ -425,7 +498,8 @@ def Eval(
         data: Evaluation data (iterable of records, can be async)
         task: Task function(s) to run on each input (can be async)
         scorer: Scorer function(s) to evaluate outputs (can be async, can be dict)
-        parameters: Optional parameters to pass to tasks
+        parameters: Optional parameters to pass to tasks. A pydantic `Field(default=...)` or
+            `Field(default_factory=...)` value is resolved to its default before any task runs.
         eval_run_name: Optional name for this eval run
         summary_score_fn: Optional function that takes a list of results and returns a dictionary of summary scores
 
@@ -490,7 +564,8 @@ async def EvalAsync(
         data: Evaluation data (iterable of records, can be async)
         task: Task function(s) to run on each input (can be async)
         scorer: Scorer function(s) to evaluate outputs (can be async, can be dict)
-        parameters: Optional parameters to pass to tasks
+        parameters: Optional parameters to pass to tasks. A pydantic `Field(default=...)` or
+            `Field(default_factory=...)` value is resolved to its default before any task runs.
         eval_run_name: Optional name for this eval run
         summary_score_fn: Optional function that takes a list of results and returns a dictionary of summary scores
 
