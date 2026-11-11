@@ -19,7 +19,7 @@ class SpanTelemetry:
         self,
         span: Span,
         span_name: str,
-        provider_name: str,
+        provider_name: Optional[str] = None,
         max_json_chars: int = MAX_JSON_CHARS,
     ):
         self.span = span
@@ -29,7 +29,9 @@ class SpanTelemetry:
         self.ended = False
         self.start_time = time.time()
 
-        self.metadata["gen_ai.provider.name"] = provider_name
+        # Model call spans name their provider. wrap() spans have none.
+        if provider_name is not None:
+            self.metadata["gen_ai.provider.name"] = provider_name
         ctx = span.get_span_context()
         self.metadata["span.trace_id"] = format_trace_id(ctx.trace_id)
         self.metadata["span.span_id"] = format_span_id(ctx.span_id)

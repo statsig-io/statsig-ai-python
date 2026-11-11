@@ -5,7 +5,7 @@ from .prompt_version import PromptVersion
 from .statsig_ai import StatsigAI
 from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig
 from .evals import Eval, EvalScorerArgs, EvalDataRecord, EvalHook
-from .wrappers import wrap_openai, WrapOpenAIOptions, GenAICaptureOptions
+from .wrappers import wrap_openai, WrapOpenAIOptions, GenAICaptureOptions, wrap, start_workflow
 from .otel import (
     initialize_tracing,
     InitializeTracingOptions,
@@ -53,6 +53,8 @@ __all__ = [
     "wrap_openai",
     "WrapOpenAIOptions",
     "GenAICaptureOptions",
+    "wrap",
+    "start_workflow",
     # OTEL
     "initialize_tracing",
     "InitializeTracingOptions",

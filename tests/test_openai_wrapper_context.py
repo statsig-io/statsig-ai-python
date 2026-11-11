@@ -2,6 +2,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 import pytest
+from opentelemetry import context as otel_context
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -18,8 +19,10 @@ from statsig_ai.otel.conventions import (
     STATSIG_ATTR_ACTIVITY_ID,
     STATSIG_ATTR_CUSTOM_IDS,
     STATSIG_ATTR_ENVIRONMENT,
+    STATSIG_ATTR_SPAN_LLM_ROOT,
     STATSIG_ATTR_SPAN_TYPE,
     STATSIG_ATTR_USER_ID,
+    STATSIG_CTX_KEY_LLM_ROOT,
 )
 from statsig_ai.otel.singleton import OtelSingleton
 from statsig_ai.wrappers import span_telemetry
@@ -111,3 +114,23 @@ def test_model_span_and_event_skip_context_attributes_outside_any_scope(traced_o
     for key in CONTEXT_KEYS:
         assert key not in attrs
         assert key not in metadata
+
+
+def test_model_span_is_the_llm_root_unless_the_context_has_a_root(traced_openai):
+    client, exporter, start_recorder, statsig = traced_openai
+
+    _chat(client)
+    token = otel_context.attach(otel_context.set_value(STATSIG_CTX_KEY_LLM_ROOT, "invoke_workflow"))
+    try:
+        client.chat.completions.create(model="gpt-4o", messages=[])
+    finally:
+        otel_context.detach(token)
+
+    root, inner = exporter.get_finished_spans()
+    assert (root.attributes or {})[STATSIG_ATTR_SPAN_LLM_ROOT] == "1"
+    assert start_recorder.by_span[root.name][STATSIG_ATTR_SPAN_LLM_ROOT] == "1"
+    assert STATSIG_ATTR_SPAN_LLM_ROOT not in (inner.attributes or {})
+
+    root_event, inner_event = statsig.events
+    assert root_event[STATSIG_ATTR_SPAN_LLM_ROOT] == "1"
+    assert STATSIG_ATTR_SPAN_LLM_ROOT not in inner_event

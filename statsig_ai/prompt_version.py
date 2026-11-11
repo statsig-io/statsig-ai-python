@@ -3,6 +3,8 @@ import re
 from typing import Any, Dict, List, TypedDict
 from statsig_python_core import DynamicConfig
 
+from .otel.prompt_context import record_prompt_template_variables
+
 
 PromptParams = Dict[str, Any]
 
@@ -88,6 +90,7 @@ class PromptVersion:
         prompts = self._prompt_variant.get_array(
             "prompts", [{"role": "system", "content": ""}]
         )
+        record_prompt_template_variables(self._id, params)
         regex = re.compile(r"{{\s*([^}]+)\s*}}")
 
         def replace_placeholders(content: str) -> str:

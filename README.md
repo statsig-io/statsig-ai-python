@@ -37,6 +37,55 @@ Read through the [Documentation](https://docs.statsig.com/ai-evals/python?ref=gh
 
 `initialize_tracing()` sends OpenTelemetry spans to Statsig, and `wrap_openai()` records each OpenAI call as a span. The tracer provider it creates uses `StatsigSpanProcessor`, which adds the user and environment attributes below to every span when it starts.
 
+### Tracing workflows and tools
+
+`wrap()` records each call of a function as a span, so the model calls an agent makes are grouped under the turn or tool that made them. A `type="workflow"` function runs in an `invoke_workflow` span and a `type="tool"` function in an `execute_tool` span. Wrapped OpenAI calls and other `wrap` spans made inside it are its children. Use it as a decorator, or call `wrap(fn, type=..., name=...)`. An `async def` function gets an async wrapper, and its span ends once the call has been awaited.
+
+```python
+from openai import AsyncOpenAI
+from statsig_ai import wrap, wrap_openai
+
+openai = wrap_openai(AsyncOpenAI())
+
+@wrap(type="tool", name="search_docs", tool_type="retrieval")
+def search_docs(query: str) -> str:
+    return index.search(query)
+
+@wrap(type="workflow", name="support_turn")
+async def run_turn(question: str) -> str:
+    docs = search_docs(question)
+    response = await openai.chat.completions.create(
+        model="gpt-4.1",
+        messages=[{"role": "user", "content": f"{question}\n\n{docs}"}],
+    )
+    return response.choices[0].message.content
+```
+
+Each span records `statsig.span.type=gen_ai`, `statsig.span.gen_ai.type` (`workflow` or `tool`), and the name as `statsig.gen_ai.workflow.name` or `statsig.gen_ai.tool.name`. `tool_type` is recorded as `gen_ai.tool.type`, and `attributes` adds your own. `user` and `activity_id` set the Statsig context for the call, as `statsig_context` does. If the function raises, the span records the exception and an `ERROR` status, and the exception is raised again. Like a wrapped model call, each call also logs a `statsig::gen_ai` event with the span's attributes.
+
+To trace a block of code instead of a function, run it inside `start_workflow`. It opens an `invoke_workflow` span marked `statsig.span.llm_root=1`, and takes `user`, `activity_id` and `attributes`. It works in sync code and inside `async def`, and an exception raised in the block is recorded on the span and propagates.
+
+```python
+from statsig_ai import StatsigUser, start_workflow
+
+async def handle_message(user: StatsigUser, question: str) -> str:
+    with start_workflow("support_turn", user=user, attributes={"channel": "chat"}):
+        docs = search_docs(question)
+        response = await openai.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": f"{question}\n\n{docs}"}],
+        )
+        return response.choices[0].message.content
+```
+
+#### Marking the LLM root
+
+`statsig.span.llm_root=1` marks the span that stands for a whole turn, so online evals don't grade each model round inside a turn as a turn of its own:
+
+- A `start_workflow` span is the root, and the model calls inside it aren't.
+- Model calls inside a `wrap(type="workflow")` span aren't the root. The workflow span isn't either, so use `start_workflow` for the outermost span of a turn.
+- A wrapped model call made outside any workflow is the root, including one inside a tool span. Tool spans are never the root.
+
 ### Tagging spans with a user
 
 Run a request inside `statsig_user_context` to tag the spans started inside it with the user's `statsig.user_id` and `statsig.custom_ids` (JSON). A user without a user ID is recorded as `unknown`.
@@ -49,7 +98,28 @@ with statsig_user_context(user):
     handle_request(request)
 ```
 
-`statsig_context(StatsigContext(user=..., activity_id=...))` tags wrapped OpenAI calls with the same attributes, plus the activity ID in `statsig.custom_ids`.
+`statsig_context(StatsigContext(user=..., activity_id=...))` tags wrapped OpenAI calls and `wrap` spans with the same attributes, plus the activity ID in `statsig.custom_ids`.
+
+### Tagging calls with a prompt version
+
+Run the code that renders and sends a prompt inside `prompt.with_live()`, or `prompt.with_version(version)` for a Candidate. Wrapped OpenAI calls and `wrap` spans inside it get `statsig.llm.prompt_name`, `statsig.llm.prompt_version` and `statsig.llm.prompt_version_id`, which Statsig uses to attribute online eval grades to a version. Spans inside it are also tagged with the user you passed to `get_prompt`, as with `statsig_user_context`.
+
+The variables you pass to `get_prompt_messages` are recorded as `statsig.llm.prompt_template_variables` (JSON), so the request can be re-run on another version. Model call spans only record them when input capture is on (`capture_all` or `capture_input_messages`), and only for the version the scope is for. Render the prompt inside the scope, before the call. Workflow spans record the variables rendered inside them, so start the workflow inside the version scope.
+
+```python
+from statsig_ai import GenAICaptureOptions, WrapOpenAIOptions, wrap_openai
+
+openai = wrap_openai(OpenAI(), WrapOpenAIOptions(GenAICaptureOptions(capture_input_messages=True)))
+prompt = statsig_ai.get_prompt(user, "support_bot")
+
+with prompt.with_live() as version:
+    response = openai.chat.completions.create(
+        model=version.get_model(),
+        messages=version.get_prompt_messages({"input": user_input}),
+    )
+```
+
+To tag spans with the prompt name and user but no version, use `with prompt.with_context():`.
 
 ### Marking the environment
 

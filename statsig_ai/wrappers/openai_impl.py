@@ -1,10 +1,18 @@
 import inspect
 import logging
 from typing import Any, Dict, Optional
+from opentelemetry import context as otel_context
 from opentelemetry.trace import SpanKind, StatusCode, Tracer
 
-from statsig_ai.otel.conventions import STATSIG_ATTR_SPAN_TYPE, StatsigSpanType
+from statsig_ai.otel.conventions import (
+    STATSIG_ATTR_SPAN_LLM_ROOT,
+    STATSIG_ATTR_SPAN_TYPE,
+    STATSIG_CTX_KEY_LLM_ROOT,
+    STATSIG_SPAN_LLM_ROOT_VALUE,
+    StatsigSpanType,
+)
 from statsig_ai.otel.environment_context import get_environment_span_attrs_from_context
+from statsig_ai.otel.prompt_context import get_prompt_span_attrs_from_context
 from statsig_ai.otel.statsig_context import get_statsig_span_attrs_from_context
 
 from .genai_attribute_helper import (
@@ -50,13 +58,37 @@ class BaseWrapper:
         )
         span_name = f"{otel_name} {model}"
 
-        # Like the Node SDK's startGenAISpan, the span starts with the statsig_context and
-        # statsig_environment attributes, and the statsig::gen_ai event gets them too.
-        statsig_attrs: Dict[str, str] = {STATSIG_ATTR_SPAN_TYPE: StatsigSpanType.GEN_AI}
-        statsig_attrs.update(get_statsig_span_attrs_from_context() or {})
-        statsig_attrs.update(get_environment_span_attrs_from_context() or {})
+        # Like the Node SDK's startGenAISpan, the span starts with the active prompt version,
+        # statsig_context and statsig_environment attributes, and the statsig::gen_ai event
+        # gets them too. Template variables usually hold user input, so they follow the same
+        # capture option as the input messages.
+        statsig_attrs: Dict[str, Any] = {STATSIG_ATTR_SPAN_TYPE: StatsigSpanType.GEN_AI}
 
-        span = _get_tracer().start_span(span_name, kind=SpanKind.CLIENT, attributes=statsig_attrs)
+        # Like the Node SDK, a model call is the LLM root unless a workflow span has set the
+        # marker in the context. It sets the marker in the context its span starts in.
+        ctx = otel_context.get_current()
+        llm_root = otel_context.get_value(STATSIG_CTX_KEY_LLM_ROOT, ctx)
+        if llm_root is None or llm_root == "":
+            ctx = otel_context.set_value(STATSIG_CTX_KEY_LLM_ROOT, span_name, ctx)
+            statsig_attrs[STATSIG_ATTR_SPAN_LLM_ROOT] = STATSIG_SPAN_LLM_ROOT_VALUE
+
+        statsig_attrs.update(
+            get_prompt_span_attrs_from_context(
+                ctx,
+                include_template_variables=(
+                    self._options.capture_all or self._options.capture_input_messages
+                ),
+            )
+        )
+        statsig_attrs.update(get_statsig_span_attrs_from_context(ctx) or {})
+        statsig_attrs.update(get_environment_span_attrs_from_context(ctx) or {})
+
+        # Template variables are a dict. SpanTelemetry writes them as capped JSON below, so
+        # the span starts with the plain values only.
+        start_attrs = {k: v for k, v in statsig_attrs.items() if not isinstance(v, (dict, list))}
+        span = _get_tracer().start_span(
+            span_name, context=ctx, kind=SpanKind.CLIENT, attributes=start_attrs
+        )
         telemetry = SpanTelemetry(span, span_name, provider_name="openai")
         telemetry.set_attributes(statsig_attrs)
 

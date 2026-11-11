@@ -18,6 +18,10 @@ from .user_context import statsig_user_context
 from .environment_context import statsig_environment
 from .incoming_trace_context import IncomingHeaders, incoming_trace_context
 from .conventions import (
+    STATSIG_ATTR_LLM_PROMPT_NAME,
+    STATSIG_ATTR_LLM_PROMPT_VERSION,
+    STATSIG_ATTR_LLM_PROMPT_VERSION_ID,
+    STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES,
     STATSIG_ATTR_USER_ID,
     STATSIG_ATTR_CUSTOM_IDS,
     STATSIG_ATTR_ACTIVITY_ID,
@@ -50,6 +54,10 @@ __all__ = [
     "incoming_trace_context",
     "IncomingHeaders",
     # Context conventions
+    "STATSIG_ATTR_LLM_PROMPT_NAME",
+    "STATSIG_ATTR_LLM_PROMPT_VERSION",
+    "STATSIG_ATTR_LLM_PROMPT_VERSION_ID",
+    "STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES",
     "STATSIG_ATTR_USER_ID",
     "STATSIG_ATTR_CUSTOM_IDS",
     "STATSIG_ATTR_ACTIVITY_ID",

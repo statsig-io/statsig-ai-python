@@ -36,8 +36,8 @@ def test_get_prompt(statsig_setup):
     statsig_ai.shutdown()
     assert prompt.get_name() == "test_prompt"
     assert isinstance(prompt.get_live(), PromptVersion)
-    assert isinstance(prompt.get_candicates(), list)
-    assert all(isinstance(c, PromptVersion) for c in prompt.get_candicates())
+    assert isinstance(prompt.get_candidates(), list)
+    assert all(isinstance(c, PromptVersion) for c in prompt.get_candidates())
 
 
 def test_get_prompt_get_live(statsig_setup):
@@ -88,7 +88,7 @@ def test_get_prompt_get_live_objects_and_arrays(statsig_setup):
     assert live_version.get_array("prompts", []) == [{"role": "system", "content": ""}]
 
 
-def test_get_prompt_get_candicates(statsig_setup):
+def test_get_prompt_get_candidates(statsig_setup):
     options, _ = statsig_setup
     statsig_ai = StatsigAI(
         statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
@@ -97,12 +97,12 @@ def test_get_prompt_get_candicates(statsig_setup):
     prompt = statsig_ai.get_prompt(StatsigUser("a-user"), "test_prompt")
     statsig_ai.shutdown()
 
-    candicates = prompt.get_candicates()
-    assert len(candicates) == 2
-    assert candicates[0].get_id() == "7jszgFEAi1KRA2Tot6qikg"
-    assert candicates[0].get_name() == "Version 2"
-    assert candicates[1].get_id() == "7CKLvQvOwjj2vjx12gFO0Z"
-    assert candicates[1].get_name() == "Version 3"
+    candidates = prompt.get_candidates()
+    assert len(candidates) == 2
+    assert candidates[0].get_id() == "7jszgFEAi1KRA2Tot6qikg"
+    assert candidates[0].get_name() == "Version 2"
+    assert candidates[1].get_id() == "7CKLvQvOwjj2vjx12gFO0Z"
+    assert candidates[1].get_name() == "Version 3"
 
 
 def test_log_eval_grade(statsig_setup):
@@ -148,7 +148,7 @@ def _log_eval_grade_and_get_event(
     statsig_ai.initialize()
     user = user or StatsigUser("a-user")
     prompt = statsig_ai.get_prompt(user, "test_prompt")
-    prompt_version = prompt.get_candicates()[0] if use_candidate else prompt.get_live()
+    prompt_version = prompt.get_candidates()[0] if use_candidate else prompt.get_live()
 
     span_context = None
     if span_name:
