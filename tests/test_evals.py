@@ -1,10 +1,18 @@
 import asyncio
+import json
 import sys
 
 import pytest
 from pydantic import Field
 from pytest_httpserver import HTTPServer
-from statsig_ai import Eval, EvalScorerArgs, EvalDataRecord, EvalHook
+from statsig_ai import (
+    Eval,
+    EvalScorerArgs,
+    EvalDataRecord,
+    EvalHook,
+    StatsigDatasetRow,
+    statsig_dataset,
+)
 from statsig_ai.evals import EvalAsync
 from statsig_ai.evals.eval_types import ScoreWithMetadata
 from mock_scrapi import MockScrapi
@@ -59,6 +67,16 @@ def eval_setup(httpserver: HTTPServer, monkeypatch):
         return original_post(url, *args, **kwargs)
 
     monkeypatch.setattr(requests, "post", intercepted_post)
+
+    original_get = requests.get
+    mock_origin = mock_scrapi.url_for_endpoint("/").rstrip("/")
+
+    def intercepted_get(url, *args, **kwargs):
+        if url.startswith("https://api.statsig.com/console/v1/eval_datasets/"):
+            return original_get(url.replace("https://api.statsig.com", mock_origin), *args, **kwargs)
+        return original_get(url, *args, **kwargs)
+
+    monkeypatch.setattr(requests, "get", intercepted_get)
 
     yield mock_scrapi
 
@@ -1631,3 +1649,239 @@ def test_eval_task_gets_empty_parameters_without_parameters(eval_setup, run_eval
     run_eval("test_empty_parameters", data=[{"input": "a"}], task=task, scorer=lambda args: 1.0)
 
     assert hook_parameters == [{}]
+
+
+def _dataset_row(index, groups=("math",)):
+    row = {
+        "rowID": f"row-{index}",
+        "columns": [
+            {"name": "question", "value": f"q{index}"},
+            {"name": "answer", "value": f"a{index}"},
+        ],
+    }
+    if groups is not None:
+        row["groups"] = list(groups)
+    return row
+
+
+def _stub_dataset_page(mock_scrapi, path_name, page, rows, status=200):
+    mock_scrapi.stub(
+        f"/console/v1/eval_datasets/{path_name}/rows",
+        response=json.dumps({"data": rows}),
+        status=status,
+        query_string={"page": str(page), "limit": "100"},
+    )
+
+
+def test_eval_on_statsig_dataset_loads_every_page_and_posts_row_ids(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+    _stub_dataset_page(mock_scrapi, "golden", 1, [_dataset_row(i) for i in range(100)])
+    _stub_dataset_page(mock_scrapi, "golden", 2, [_dataset_row(100)])
+
+    result = run_eval(
+        "dataset eval",
+        data=statsig_dataset(
+            "golden",
+            lambda row: {
+                "input": row.columns["question"],
+                "expected": row.columns["answer"],
+                "category": row.groups,
+            },
+        ),
+        task=lambda input: input.replace("q", "a"),
+        scorer=lambda args: args.output == args.expected,
+    )
+
+    assert len(result.results) == 101
+    assert {r.row_id for r in result.results} == {f"row-{i}" for i in range(101)}
+    assert all(r.scores == {"Grader": 1.0} for r in result.results)
+
+    page_requests = mock_scrapi.get_requests_for_endpoint("/console/v1/eval_datasets/golden/rows")
+    assert [dict(r.args) for r in page_requests] == [
+        {"page": "1", "limit": "100"},
+        {"page": "2", "limit": "100"},
+    ]
+    assert [r.headers["STATSIG-API-KEY"] for r in page_requests] == ["test-api-key"] * 2
+
+    payloads = mock_scrapi.get_eval_payloads()
+    assert len(payloads) == 1
+    assert payloads[0]["dataset"] == "golden"
+    payload_results = {r["rowID"]: r for r in payloads[0]["results"]}
+    assert len(payload_results) == 101
+    assert payload_results["row-100"] == {
+        "input": "q100",
+        "expected": "a100",
+        "output": "a100",
+        "category": ["math"],
+        "rowID": "row-100",
+        "scores": {"Grader": {"score": 1.0}},
+        "error": False,
+    }
+
+
+def test_statsig_dataset_maps_rows_and_keeps_their_row_ids(eval_setup):
+    mock_scrapi = eval_setup
+    _stub_dataset_page(mock_scrapi, "golden", 1, [_dataset_row(0), _dataset_row(1, groups=None)])
+    rows = []
+    scorer_row_ids = []
+
+    def to_record(row):
+        rows.append(row)
+        if row.row_id == "row-0":
+            return {"input": row.columns["question"]}
+        return EvalDataRecord(input=row.columns["question"], row_id="some-other-row")
+
+    def scorer(args: EvalScorerArgs[str, str]) -> float:
+        scorer_row_ids.append(args.row_id)
+        return 1.0
+
+    result = Eval(
+        "dataset eval",
+        data=statsig_dataset("golden", to_record),
+        task=lambda input: input,
+        scorer=scorer,
+    )
+
+    assert rows == [
+        StatsigDatasetRow(
+            row_id="row-0", columns={"question": "q0", "answer": "a0"}, groups=["math"]
+        ),
+        StatsigDatasetRow(row_id="row-1", columns={"question": "q1", "answer": "a1"}, groups=[]),
+    ]
+    results = results_by_input(result.results)
+    assert results["q0"].row_id == "row-0"
+    assert results["q1"].row_id == "row-1"
+    assert sorted(scorer_row_ids) == ["row-0", "row-1"]
+    # A page with fewer than 100 rows is the last one.
+    assert mock_scrapi.times_called_for_endpoint("/console/v1/eval_datasets/") == 1
+
+    payload_results = results_by_input(mock_scrapi.get_eval_payloads()[0]["results"])
+    assert payload_results["q0"]["rowID"] == "row-0"
+    assert payload_results["q1"]["rowID"] == "row-1"
+
+
+def test_statsig_dataset_url_encodes_the_dataset_name(eval_setup):
+    mock_scrapi = eval_setup
+    _stub_dataset_page(mock_scrapi, "golden set/v2", 1, [_dataset_row(0)])
+
+    Eval(
+        "dataset eval",
+        data=statsig_dataset("golden set/v2", lambda row: {"input": row.columns["question"]}),
+        task=lambda input: input,
+        scorer=lambda args: 1,
+    )
+
+    [page_request] = mock_scrapi.get_requests_for_endpoint("/console/v1/eval_datasets/")
+    assert page_request.environ["RAW_URI"] == (
+        "/console/v1/eval_datasets/golden%20set%2Fv2/rows?page=1&limit=100"
+    )
+    assert mock_scrapi.get_eval_payloads()[0]["dataset"] == "golden set/v2"
+
+
+def test_eval_dataset_option_with_caller_built_records(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+
+    result = run_eval(
+        "dataset eval",
+        data=[
+            {"input": "q0", "expected": "q0", "row_id": "row-0"},
+            EvalDataRecord(input="q1", row_id="row-1"),
+        ],
+        dataset="golden",
+        task=lambda input: input,
+        scorer=lambda args: 1,
+    )
+
+    results = results_by_input(result.results)
+    assert results["q0"].row_id == "row-0"
+    assert results["q1"].row_id == "row-1"
+
+    payload = mock_scrapi.get_eval_payloads()[0]
+    assert payload["dataset"] == "golden"
+    payload_results = results_by_input(payload["results"])
+    assert payload_results["q0"]["rowID"] == "row-0"
+    assert payload_results["q1"]["rowID"] == "row-1"
+
+
+def test_eval_dataset_option_overrides_the_statsig_dataset_name(eval_setup):
+    mock_scrapi = eval_setup
+    _stub_dataset_page(mock_scrapi, "golden", 1, [_dataset_row(0)])
+
+    Eval(
+        "dataset eval",
+        data=statsig_dataset("golden", lambda row: {"input": row.columns["question"]}),
+        dataset="golden-copy",
+        task=lambda input: input,
+        scorer=lambda args: 1,
+    )
+
+    assert mock_scrapi.get_eval_payloads()[0]["dataset"] == "golden-copy"
+
+
+def test_eval_without_dataset_sends_no_dataset(eval_setup):
+    mock_scrapi = eval_setup
+
+    Eval(
+        "no dataset eval",
+        data=[{"input": "q0", "row_id": "row-0"}, {"input": "q1"}],
+        task=lambda input: input,
+        scorer=lambda args: 1,
+    )
+
+    payload = mock_scrapi.get_eval_payloads()[0]
+    assert "dataset" not in payload
+    payload_results = results_by_input(payload["results"])
+    assert payload_results["q0"]["rowID"] == "row-0"
+    assert "rowID" not in payload_results["q1"]
+
+
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        (
+            [{"input": "q0", "row_id": "row-0"}, {"input": "q1"}],
+            r"data\[1\] needs a row_id when the eval names a dataset",
+        ),
+        (
+            [EvalDataRecord(input="q0", row_id="")],
+            r"data\[0\] needs a row_id when the eval names a dataset",
+        ),
+        (
+            [{"input": "q0", "row_id": "row-0"}, EvalDataRecord(input="q1", row_id="row-0")],
+            r"data\[1\] repeats row_id row-0; each record needs its own dataset row",
+        ),
+    ],
+    ids=["missing", "empty", "duplicate"],
+)
+def test_eval_checks_row_ids_before_any_task_runs(eval_setup, run_eval, data, message):
+    mock_scrapi = eval_setup
+    task_inputs = []
+
+    with pytest.raises(ValueError, match=message):
+        run_eval(
+            "dataset eval",
+            data=data,
+            dataset="golden",
+            task=lambda input: task_inputs.append(input),
+            scorer=lambda args: 1,
+        )
+
+    assert task_inputs == []
+    assert mock_scrapi.get_eval_payloads() == []
+
+
+def test_eval_fails_when_the_dataset_cannot_be_loaded(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+    _stub_dataset_page(mock_scrapi, "missing", 1, [], status=404)
+    task_inputs = []
+
+    with pytest.raises(RuntimeError, match="Failed to load eval dataset 'missing': 404"):
+        run_eval(
+            "dataset eval",
+            data=statsig_dataset("missing", lambda row: {"input": row.columns["question"]}),
+            task=lambda input: task_inputs.append(input),
+            scorer=lambda args: 1,
+        )
+
+    assert task_inputs == []
+    assert mock_scrapi.get_eval_payloads() == []

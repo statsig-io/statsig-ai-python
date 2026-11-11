@@ -45,6 +45,7 @@ from .eval_types import (
     EvalResultRecord,
     SummaryScorerFn,
 )
+from .statsig_dataset import StatsigDataset
 
 
 T = TypeVar("T")
@@ -72,6 +73,7 @@ def _normalize_record(
             input=cast(Input, record.get("input")),
             category=record.get("category"),
             expected=cast(Optional[Output], record.get("expected")),
+            row_id=record.get("row_id"),
         )
 
     raise TypeError(f"Invalid data record type: {type(record)}")
@@ -95,6 +97,23 @@ async def _normalize_into_data_iterator(
 
     async for record in data_iterator:
         yield _normalize_record(record)
+
+
+def _assert_dataset_row_ids(records: List[EvalDataRecord[Input, Output]]) -> None:
+    """Checked before any task runs: the API rejects a run on a dataset whose
+    results don't each name a different row of it."""
+    seen = set()
+    for index, record in enumerate(records):
+        if not record.row_id:
+            raise ValueError(
+                f"[Statsig] data[{index}] needs a row_id when the eval names a dataset."
+            )
+        if record.row_id in seen:
+            raise ValueError(
+                f"[Statsig] data[{index}] repeats row_id {record.row_id}; "
+                "each record needs its own dataset row."
+            )
+        seen.add(record.row_id)
 
 
 def _normalize_scorers(scorers: EvalScorer) -> ScorerFnMap[Input, Output]:
@@ -175,6 +194,8 @@ def _serialize_record(record: EvalResultRecordWithMetadata[Input, Output]) -> Di
         serialized["expected"] = _stringify_payload_value(record.expected)
     if record.category is not None:
         serialized["category"] = SerializableDataClass._serialize_value(record.category)
+    if record.row_id is not None:
+        serialized["rowID"] = record.row_id
     return serialized
 
 
@@ -185,6 +206,7 @@ def _send_eval_results(
     eval_run_name: Optional[str],
     summary_scores: Optional[Dict[str, float]],
     parameters: Optional[EvalParameters],
+    dataset: Optional[str],
 ) -> None:
     """Send eval results to Statsig API (synchronous, using requests)."""
 
@@ -198,6 +220,8 @@ def _send_eval_results(
         payload: Dict[str, Any] = {"results": [_serialize_record(record) for record in records]}
         if eval_run_name:
             payload["name"] = eval_run_name
+        if dataset is not None:
+            payload["dataset"] = dataset
         if summary_scores:
             payload["summaryScores"] = summary_scores
         if parameters:
@@ -286,6 +310,7 @@ async def _run_scorer(
             output=output,
             expected=data_record.expected,
             category=data_record.category,
+            row_id=data_record.row_id,
         )
 
         # Check for AsyncScorer protocol (has a score method)
@@ -368,6 +393,7 @@ async def _run_task_and_score_one_record(
             input=data_record.input,
             expected=data_record.expected,
             category=data_record.category,
+            row_id=data_record.row_id,
             output=output,
             scores={name: ScoreWithMetadata(score=0.0, metadata=None) for name in scorers.keys()},
             error=True,
@@ -383,6 +409,7 @@ async def _run_task_and_score_one_record(
         input=data_record.input,
         expected=data_record.expected,
         category=data_record.category,
+        row_id=data_record.row_id,
         output=output,
         scores=dict(zip(scorers.keys(), score_results)),
         error=False,
@@ -407,17 +434,19 @@ def _convert_results_to_results_without_metadata(
         expected=result.expected,
         error=result.error,
         category=result.category,
+        row_id=result.row_id,
     ) for result in results_with_metadata]
     return results_without_metadata
 
 async def _run_eval_helper(
     name: str,
-    data: EvalData[Input, Output],
+    data: Union[EvalData[Input, Output], StatsigDataset[Input, Output]],
     task: EvalTask[Input, Output],
     scorer: EvalScorer[Input, Output],
     parameters: Optional[EvalParameters],
     eval_run_name: Optional[str],
     summary_score_fn: Optional[SummaryScorerFn[Input, Output]],
+    dataset: Optional[str],
 ) -> EvalResult[Input, Output]:
     """
     Core eval logic that runs asynchronously.
@@ -431,14 +460,24 @@ async def _run_eval_helper(
 
     logging.info("[Statsig] Running eval: %s", name)
 
-    data_iterator: AsyncIterator[EvalDataRecord[Input, Output]] = _normalize_into_data_iterator(
-        data
-    )
+    if dataset is None and isinstance(data, StatsigDataset):
+        dataset = data.name
+
     normalized_scorers: ScorerFnMap[Input, Output] = _normalize_scorers(scorer)
 
     records: List[EvalDataRecord[Input, Output]] = []
-    async for record in data_iterator:
-        records.append(record)
+    if isinstance(data, StatsigDataset):
+        dataset_records = await asyncio.to_thread(data.load, api_key)
+        records = [_normalize_record(dataset_record) for dataset_record in dataset_records]
+    else:
+        data_iterator: AsyncIterator[EvalDataRecord[Input, Output]] = (
+            _normalize_into_data_iterator(data)
+        )
+        async for record in data_iterator:
+            records.append(record)
+
+    if dataset is not None:
+        _assert_dataset_row_ids(records)
 
     resolved_parameters = _resolve_parameters(parameters)
 
@@ -470,7 +509,7 @@ async def _run_eval_helper(
     summary_scores = _run_summary_scorer(summary_score_fn, results_without_metadata)
 
     _send_eval_results(
-        name, results, api_key, eval_run_name, summary_scores, resolved_parameters
+        name, results, api_key, eval_run_name, summary_scores, resolved_parameters, dataset
     )
 
     return EvalResult(
@@ -483,11 +522,12 @@ async def _run_eval_helper(
 def Eval(
     name: str,
     *,
-    data: EvalData[Input, Output],
+    data: Union[EvalData[Input, Output], StatsigDataset[Input, Output]],
     task: Union[EvalTask[Input, Output]],
     scorer: EvalScorer[Input, Output],
     parameters: Optional[EvalParameters] = None,
     eval_run_name: Optional[str] = None,
+    dataset: Optional[str] = None,
     summary_score_fn: Optional[SummaryScorerFn[Input, Output]] = None,
 ) -> EvalResult[Input, Output]:
     """
@@ -495,12 +535,16 @@ def Eval(
 
     Args:
         name: Name of the evaluation
-        data: Evaluation data (iterable of records, can be async)
+        data: Evaluation data (iterable of records, can be async), or a Statsig dataset from
+            `statsig_dataset()`
         task: Task function(s) to run on each input (can be async)
         scorer: Scorer function(s) to evaluate outputs (can be async, can be dict)
         parameters: Optional parameters to pass to tasks. A pydantic `Field(default=...)` or
             `Field(default_factory=...)` value is resolved to its default before any task runs.
         eval_run_name: Optional name for this eval run
+        dataset: Name or id of the Statsig eval dataset the data came from. The console
+            compares runs on the same dataset row by row, so every record needs the `row_id`
+            of its dataset row. Set for you when `data` is `statsig_dataset()`.
         summary_score_fn: Optional function that takes a list of results and returns a dictionary of summary scores
 
     Returns:
@@ -529,7 +573,14 @@ def Eval(
             try:
                 return new_loop.run_until_complete(
                     _run_eval_helper(
-                        name, data, task, scorer, parameters, eval_run_name, summary_score_fn
+                        name,
+                        data,
+                        task,
+                        scorer,
+                        parameters,
+                        eval_run_name,
+                        summary_score_fn,
+                        dataset,
                     )
                 )
             finally:
@@ -542,18 +593,21 @@ def Eval(
 
     else:
         return asyncio.run(
-            _run_eval_helper(name, data, task, scorer, parameters, eval_run_name, summary_score_fn)
+            _run_eval_helper(
+                name, data, task, scorer, parameters, eval_run_name, summary_score_fn, dataset
+            )
         )
 
 
 async def EvalAsync(
     name: str,
     *,
-    data: EvalData[Input, Output],
+    data: Union[EvalData[Input, Output], StatsigDataset[Input, Output]],
     task: Union[EvalTask[Input, Output]],
     scorer: EvalScorer[Input, Output],
     parameters: Optional[EvalParameters] = None,
     eval_run_name: Optional[str] = None,
+    dataset: Optional[str] = None,
     summary_score_fn: Optional[SummaryScorerFn[Input, Output]] = None,
 ) -> EvalResult[Input, Output]:
     """
@@ -561,12 +615,16 @@ async def EvalAsync(
 
     Args:
         name: Name of the evaluation
-        data: Evaluation data (iterable of records, can be async)
+        data: Evaluation data (iterable of records, can be async), or a Statsig dataset from
+            `statsig_dataset()`
         task: Task function(s) to run on each input (can be async)
         scorer: Scorer function(s) to evaluate outputs (can be async, can be dict)
         parameters: Optional parameters to pass to tasks. A pydantic `Field(default=...)` or
             `Field(default_factory=...)` value is resolved to its default before any task runs.
         eval_run_name: Optional name for this eval run
+        dataset: Name or id of the Statsig eval dataset the data came from. The console
+            compares runs on the same dataset row by row, so every record needs the `row_id`
+            of its dataset row. Set for you when `data` is `statsig_dataset()`.
         summary_score_fn: Optional function that takes a list of results and returns a dictionary of summary scores
 
     Returns:
@@ -577,5 +635,5 @@ async def EvalAsync(
         an async context for better performance and to avoid event loop conflicts.
     """
     return await _run_eval_helper(
-        name, data, task, scorer, parameters, eval_run_name, summary_score_fn
+        name, data, task, scorer, parameters, eval_run_name, summary_score_fn, dataset
     )

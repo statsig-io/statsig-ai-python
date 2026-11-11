@@ -33,11 +33,14 @@ class EvalDataRecord(SerializableDataClass, Generic[Input, Output]):
     input: Input
     category: Optional[Union[Sequence[str], str]] = None
     expected: Optional[Output] = None
+    # Id of the record's row in the eval's `dataset`
+    row_id: Optional[str] = None
 
 
 class _EvalDataRecordDictVoidExpected(TypedDict, Generic[Input], total=False):
     input: Input
     category: Optional[Union[Sequence[str], str]]
+    row_id: Optional[str]
 
 
 class _EvalDataRecordDict(
@@ -90,6 +93,7 @@ class EvalScorerArgs(SerializableDataClass, Generic[Input, Output]):
     output: Output
     expected: Optional[Output] = None
     category: Optional[Union[Sequence[str], str]] = None
+    row_id: Optional[str] = None
 
 
 class SyncScorer(Protocol, Generic[Input, Output]):
@@ -132,6 +136,7 @@ class EvalResultRecordWithMetadata(SerializableDataClass, Generic[Input, Output]
     expected: Optional[Output] = None
     error: Optional[bool] = False
     category: Optional[Union[Sequence[str], str]] = None
+    row_id: Optional[str] = None
 
 @dataclass
 class EvalResultRecord(SerializableDataClass, Generic[Input, Output]):
@@ -141,6 +146,7 @@ class EvalResultRecord(SerializableDataClass, Generic[Input, Output]):
     expected: Optional[Output] = None
     error: Optional[bool] = False
     category: Optional[Union[Sequence[str], str]] = None
+    row_id: Optional[str] = None
 
 
 @dataclass

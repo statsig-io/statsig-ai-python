@@ -196,6 +196,30 @@ python examples/ai_wrappers/wrap_openai.py
 Available examples:
 - `examples/ai_wrappers/wrap_openai.py` - Demonstrates wrapping OpenAI clients with Statsig telemetry (sync/async, streaming/non-streaming)
 
+## Running evals on a Statsig dataset
+
+Pass `statsig_dataset(name, to_record)` as `Eval()`'s `data` to run on an eval dataset from the console. `to_record` says which columns hold the input and the expected value. The run names the dataset and each result keeps its dataset row id, so the Eval page compares runs on the dataset row by row.
+
+```python
+from statsig_ai import Eval, statsig_dataset
+
+Eval(
+    "support_bot_quality",
+    data=statsig_dataset(
+        "support_cases",
+        lambda row: {
+            "input": row.columns["question"],
+            "expected": row.columns["answer"],
+            "category": row.groups,
+        },
+    ),
+    task=lambda input: answer(input),
+    scorer=lambda args: args.output == args.expected,
+)
+```
+
+To post your own records for a dataset instead, set `dataset` and give each record the `row_id` of its dataset row.
+
 ## Community
 
 If you need any assistance or just have a question, feel free to reach out to us on [Slack](https://statsig.com/community?ref=gh_jsm).

@@ -4,7 +4,15 @@ from .ai_eval_grade_data import AIEvalGradeData
 from .prompt_version import PromptVersion
 from .statsig_ai import StatsigAI
 from .statsig_ai_base import StatsigCreateConfig, StatsigAttachConfig
-from .evals import Eval, EvalScorerArgs, EvalDataRecord, EvalHook
+from .evals import (
+    Eval,
+    EvalScorerArgs,
+    EvalDataRecord,
+    EvalHook,
+    StatsigDataset,
+    StatsigDatasetRow,
+    statsig_dataset,
+)
 from .wrappers import wrap_openai, WrapOpenAIOptions, GenAICaptureOptions, wrap, start_workflow
 from .otel import (
     initialize_tracing,
@@ -49,6 +57,9 @@ __all__ = [
     "EvalScorerArgs",
     "EvalDataRecord",
     "EvalHook",
+    "StatsigDataset",
+    "StatsigDatasetRow",
+    "statsig_dataset",
     # Wrappers
     "wrap_openai",
     "WrapOpenAIOptions",

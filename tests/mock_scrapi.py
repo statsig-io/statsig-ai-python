@@ -19,7 +19,7 @@ class MockScrapi:
             self.logged_events = []
             self.eval_payloads = []
 
-    def stub(self, endpoint, response="", status=200, method="GET"):
+    def stub(self, endpoint, response="", status=200, method="GET", query_string=None):
         def handler(req: Request):
             with self.lock:
                 self.requests.append(req)
@@ -35,7 +35,9 @@ class MockScrapi:
 
             return Response(response, status=status)
 
-        self.httpserver.expect_request(endpoint, method=method).respond_with_handler(handler)
+        self.httpserver.expect_request(
+            endpoint, method=method, query_string=query_string
+        ).respond_with_handler(handler)
 
     def url_for_endpoint(self, endpoint):
         return self.httpserver.url_for(endpoint)
