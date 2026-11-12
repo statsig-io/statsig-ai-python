@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional
 from .configs import GenAICaptureOptions
+from .openai_messages import to_openai_output_messages, to_openai_request_messages
 
 
 def extract_oai_usage_attributes(usage: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,15 +114,21 @@ def extract_opt_in_attributes(
     response: Any,
 ) -> Dict[str, Any]:
     attrs: Dict[str, Any] = {}
-    if gen_ai_capture_options.capture_input_messages or gen_ai_capture_options.capture_all:
-        attrs["gen_ai.input.messages"] = kwargs.get("messages") or kwargs.get("input") or []
-    if gen_ai_capture_options.capture_output_messages or gen_ai_capture_options.capture_all:
-        attrs["gen_ai.output.messages"] = response.get("choices") or response.get("output") or []
-    if gen_ai_capture_options.capture_system_instructions or gen_ai_capture_options.capture_all:
-        msgs = kwargs.get("messages") or kwargs.get("input") or []
-        system_instructions = [msg for msg in msgs if msg.get("role") == "system"]
-        attrs["gen_ai.system_instructions"] = system_instructions
-    if gen_ai_capture_options.capture_tool_definitions or gen_ai_capture_options.capture_all:
+    capture_all = gen_ai_capture_options.capture_all
+    capture_input = capture_all or gen_ai_capture_options.capture_input_messages
+    capture_system = capture_all or gen_ai_capture_options.capture_system_instructions
+    if capture_input or capture_system:
+        # Messages are written in the OpenTelemetry GenAI message format, like the Node SDK.
+        input_messages, system_instructions = to_openai_request_messages(kwargs)
+        if capture_input:
+            attrs["gen_ai.input.messages"] = input_messages
+        if capture_system and system_instructions:
+            attrs["gen_ai.system_instructions"] = system_instructions
+    if capture_all or gen_ai_capture_options.capture_output_messages:
+        output_messages = to_openai_output_messages(response)
+        if output_messages is not None:
+            attrs["gen_ai.output.messages"] = output_messages
+    if gen_ai_capture_options.capture_tool_definitions or capture_all:
         attrs["gen_ai.tool.definitions"] = kwargs.get("tools")
     return attrs
 

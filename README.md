@@ -65,6 +65,8 @@ If there's no agent config with that name, `get_agent_config` still returns one.
 
 `initialize_tracing()` sends OpenTelemetry spans to Statsig, and `wrap_openai()` records each OpenAI call as a span. The tracer provider it creates uses `StatsigSpanProcessor`, which adds the user and environment attributes below to every span when it starts.
 
+Messages are only recorded when you opt in with `GenAICaptureOptions` (for example `wrap_openai(OpenAI(), WrapOpenAIOptions(GenAICaptureOptions(capture_all=True)))`). `gen_ai.input.messages`, `gen_ai.output.messages` and `gen_ai.system_instructions` are recorded in the [OpenTelemetry GenAI message format](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/) (`role` + `parts` such as `text`, `tool_call` and `tool_call_response`). System and developer messages, and the Responses API `instructions`, are recorded as system instructions rather than input messages.
+
 ### Tracing workflows and tools
 
 `wrap()` records each call of a function as a span, so the model calls an agent makes are grouped under the turn or tool that made them. A `type="workflow"` function runs in an `invoke_workflow` span and a `type="tool"` function in an `execute_tool` span. Wrapped OpenAI calls and other `wrap` spans made inside it are its children. Use it as a decorator, or call `wrap(fn, type=..., name=...)`. An `async def` function gets an async wrapper, and its span ends once the call has been awaited.
