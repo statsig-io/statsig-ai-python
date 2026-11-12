@@ -14,7 +14,14 @@ from .evals import (
     StatsigDatasetRow,
     statsig_dataset,
 )
-from .wrappers import wrap_openai, WrapOpenAIOptions, GenAICaptureOptions, wrap, start_workflow
+from .wrappers import (
+    wrap_openai,
+    wrap_gemini,
+    WrapOpenAIOptions,
+    GenAICaptureOptions,
+    wrap,
+    start_workflow,
+)
 from .otel import (
     initialize_tracing,
     InitializeTracingOptions,
@@ -65,6 +72,7 @@ __all__ = [
     "statsig_dataset",
     # Wrappers
     "wrap_openai",
+    "wrap_gemini",
     "WrapOpenAIOptions",
     "GenAICaptureOptions",
     "wrap",

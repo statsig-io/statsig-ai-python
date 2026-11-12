@@ -63,9 +63,43 @@ If there's no agent config with that name, `get_agent_config` still returns one.
 
 ## Tracing
 
-`initialize_tracing()` sends OpenTelemetry spans to Statsig, and `wrap_openai()` records each OpenAI call as a span. The tracer provider it creates uses `StatsigSpanProcessor`, which adds the user and environment attributes below to every span when it starts.
+`initialize_tracing()` sends OpenTelemetry spans to Statsig, and `wrap_openai()` and `wrap_gemini()` record each OpenAI or Gemini call as a span. The tracer provider it creates uses `StatsigSpanProcessor`, which adds the user and environment attributes below to every span when it starts.
 
 Messages are only recorded when you opt in with `GenAICaptureOptions` (for example `wrap_openai(OpenAI(), WrapOpenAIOptions(GenAICaptureOptions(capture_all=True)))`). `gen_ai.input.messages`, `gen_ai.output.messages` and `gen_ai.system_instructions` are recorded in the [OpenTelemetry GenAI message format](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/) (`role` + `parts` such as `text`, `tool_call` and `tool_call_response`). System and developer messages, and the Responses API `instructions`, are recorded as system instructions rather than input messages.
+
+### Tracing Gemini calls
+
+`wrap_gemini()` wraps a [google-genai](https://pypi.org/project/google-genai/) `Client`. It records `client.models.generate_content` and `generate_content_stream`, and their async versions on `client.aio.models`, as `generate_content <model>` spans with `gen_ai.provider.name=gcp.gen_ai`, and logs a `statsig::gen_ai` event for each call. It takes the same `WrapOpenAIOptions` as `wrap_openai()`. google-genai isn't a dependency of this SDK, so install it yourself.
+
+```python
+from google import genai
+from statsig_ai import GenAICaptureOptions, WrapOpenAIOptions, wrap_gemini
+
+client = wrap_gemini(genai.Client(), WrapOpenAIOptions(GenAICaptureOptions(capture_all=True)))
+
+response = client.models.generate_content(
+    model="gemini-2.5-flash",
+    contents="Is checkout on?",
+    config={"system_instruction": "Answer in one sentence."},
+)
+
+for chunk in client.models.generate_content_stream(model="gemini-2.5-flash", contents="Hi"):
+    print(chunk.text, end="")
+
+async def stream_reply() -> None:
+    stream = await client.aio.models.generate_content_stream(
+        model="gemini-2.5-flash", contents="Hi"
+    )
+    async for chunk in stream:
+        print(chunk.text, end="")
+```
+
+- `contents` is recorded as input messages, and `config.system_instruction` as system instructions. Function calls and function responses are recorded as `tool_call` and `tool_call_response` parts, and thoughts as `reasoning` parts.
+- Each candidate is an output message. Its finish reason is `tool_call` when it calls a function, `stop` for `STOP`, `length` for `MAX_TOKENS`, `content_filter` for `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT` and `SPII`, and otherwise the lowercased reason. `gen_ai.response.finish_reasons` keeps Gemini's own values.
+- Token usage is recorded as `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` and `statsig.gen_ai.usage.total_tokens`. Cached content tokens are recorded as `statsig.gen_ai.usage.input_cached_tokens`. Thinking tokens are counted as output tokens and also recorded as `statsig.gen_ai.usage.output_reasoning_tokens`.
+- A streamed call's span ends once you've consumed the stream. Its chunks are merged into one response, with the text of each candidate joined.
+- If a call raises, the span records the exception and an `ERROR` status, and the exception is raised again.
+- Chat sessions (`client.chats`) aren't traced.
 
 ### Tracing workflows and tools
 
@@ -128,7 +162,7 @@ with statsig_user_context(user):
     handle_request(request)
 ```
 
-`statsig_context(StatsigContext(user=..., activity_id=...))` tags wrapped OpenAI calls and `wrap` spans with the same attributes, plus the activity ID in `statsig.custom_ids`.
+`statsig_context(StatsigContext(user=..., activity_id=...))` tags wrapped OpenAI and Gemini calls and `wrap` spans with the same attributes, plus the activity ID in `statsig.custom_ids`.
 
 ### Tagging calls with a prompt version
 
