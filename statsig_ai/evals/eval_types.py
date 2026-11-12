@@ -137,6 +137,9 @@ class EvalResultRecordWithMetadata(SerializableDataClass, Generic[Input, Output]
     error: Optional[bool] = False
     category: Optional[Union[Sequence[str], str]] = None
     row_id: Optional[str] = None
+    # Trace and root span of the record's run, as lowercase hex. Set when tracing is initialized.
+    trace_id: Optional[str] = None
+    span_id: Optional[str] = None
 
 @dataclass
 class EvalResultRecord(SerializableDataClass, Generic[Input, Output]):
@@ -147,6 +150,9 @@ class EvalResultRecord(SerializableDataClass, Generic[Input, Output]):
     error: Optional[bool] = False
     category: Optional[Union[Sequence[str], str]] = None
     row_id: Optional[str] = None
+    # Trace and root span of the record's run, as lowercase hex. Set when tracing is initialized.
+    trace_id: Optional[str] = None
+    span_id: Optional[str] = None
 
 
 @dataclass

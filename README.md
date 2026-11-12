@@ -153,7 +153,7 @@ To tag spans with the prompt name and user but no version, use `with prompt.with
 
 The `environment` option of `InitializeTracingOptions` (defaults to `PYTHON_ENV`) is recorded on the resource as `env` and `deployment.environment.name`. To tag only some spans, for example evals running in the same process as production code, run that code inside `statsig_environment`. Spans started inside it get a `statsig.environment` attribute, which overrides the resource value for those spans.
 
-Use `production` for live traffic. `eval` and `online_eval_judge` are reserved for spans Statsig generates.
+Use `production` for live traffic. `eval` and `online_eval_judge` are reserved for spans Statsig generates: `Eval()` runs its tasks and scorers with `statsig.environment=eval`.
 
 ```python
 from statsig_ai import InitializeTracingOptions, initialize_tracing, statsig_environment
@@ -163,6 +163,12 @@ initialize_tracing(InitializeTracingOptions(environment="production"))
 with statsig_environment("staging_canary"):
     handle_request(request)
 ```
+
+### Tracing evals
+
+When tracing is initialized with `initialize_tracing()`, `Eval()` and `EvalAsync()` give each record its own trace, even when they're called inside another span. The root span is a `workflow` span marked `statsig.span.llm_root=1` and `statsig.environment=eval`, with `statsig.eval.name`, `statsig.eval.run_name` and `statsig.eval.record_index`. Model calls the task makes through `wrap_openai()`, from an `async def` task or a plain function, are its children, and each scorer runs in its own child span with `statsig.eval.scorer_name`. If the task raises, the record span records the exception. Each result's `trace_id` and `span_id` are returned and sent to Statsig with the scores, and `Eval()` flushes the spans before it sends the results.
+
+Without `initialize_tracing()`, records aren't traced, but tasks and scorers still run with `statsig.environment=eval`.
 
 ### Joining a Statsig eval trace
 

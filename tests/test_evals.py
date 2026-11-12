@@ -3,6 +3,10 @@ import json
 import sys
 
 import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 from pydantic import Field
 from pytest_httpserver import HTTPServer
 from statsig_ai import (
@@ -11,10 +15,33 @@ from statsig_ai import (
     EvalDataRecord,
     EvalHook,
     StatsigDatasetRow,
+    StatsigSpanProcessor,
+    StatsigUser,
     statsig_dataset,
+    statsig_user_context,
+    wrap,
+    wrap_openai,
 )
 from statsig_ai.evals import EvalAsync
 from statsig_ai.evals.eval_types import ScoreWithMetadata
+from statsig_ai.otel.conventions import (
+    STATSIG_ATTR_ENVIRONMENT,
+    STATSIG_ATTR_EVAL_NAME,
+    STATSIG_ATTR_EVAL_RECORD_INDEX,
+    STATSIG_ATTR_EVAL_RUN_NAME,
+    STATSIG_ATTR_EVAL_SCORER_NAME,
+    STATSIG_ATTR_GEN_AI_SPAN_TYPE,
+    STATSIG_ATTR_SPAN_LLM_ROOT,
+    STATSIG_ATTR_SPAN_TYPE,
+    STATSIG_ATTR_USER_ID,
+    STATSIG_SPAN_LLM_ROOT_VALUE,
+    StatsigGenAISpanType,
+    StatsigSpanType,
+)
+from statsig_ai.otel.environment_context import get_environment_span_attrs_from_context
+from statsig_ai.otel.singleton import OtelSingleton
+from statsig_ai.wrappers import span_telemetry
+from mock_openai import MockOpenAI
 from mock_scrapi import MockScrapi
 
 
@@ -1885,3 +1912,351 @@ def test_eval_fails_when_the_dataset_cannot_be_loaded(eval_setup, run_eval):
 
     assert task_inputs == []
     assert mock_scrapi.get_eval_payloads() == []
+
+
+# Record traces, ported from the Node SDK's eval tests.
+
+
+class _EvalTracing:
+    def __init__(self, provider: TracerProvider, exporter: InMemorySpanExporter) -> None:
+        self.provider = provider
+        self.exporter = exporter
+
+    def spans(self):
+        # Read without flushing, so the spans are only here if Eval() flushed them.
+        return list(self.exporter.get_finished_spans())
+
+    def span(self, span_id: str) -> ReadableSpan:
+        [span] = [s for s in self.spans() if _span_id(s) == span_id]
+        return span
+
+    def children(self, span_id: str):
+        return [s for s in self.spans() if s.parent is not None and _parent_id(s) == span_id]
+
+
+def _span_id(span: ReadableSpan) -> str:
+    return trace.format_span_id(span.context.span_id)
+
+
+def _trace_id(span: ReadableSpan) -> str:
+    return trace.format_trace_id(span.context.trace_id)
+
+
+def _parent_id(span: ReadableSpan) -> str:
+    assert span.parent is not None
+    return trace.format_span_id(span.parent.span_id)
+
+
+@pytest.fixture
+def tracing(monkeypatch):
+    exporter = InMemorySpanExporter()
+    # Exports only on flush, so finished spans show that Eval() flushed.
+    processor = StatsigSpanProcessor(exporter, schedule_delay_millis=60_000)
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    monkeypatch.setattr(OtelSingleton, "_instance", OtelSingleton(provider))
+    monkeypatch.setattr(span_telemetry, "get_statsig_instance_for_logging", lambda: None)
+
+    yield _EvalTracing(provider, exporter)
+
+    provider.shutdown()
+
+
+class _AsyncEchoOpenAI:
+    """An AsyncOpenAI stand-in that replies "Hello <first message>"."""
+
+    def __init__(self) -> None:
+        self.chat = self.ChatNamespace()
+
+    class ChatNamespace:
+        class CompletionsNamespace:
+            async def create(self, *args, **kwargs):
+                await asyncio.sleep(0)
+                return {
+                    "id": "chatcmpl_1",
+                    "model": kwargs["model"],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "Hello " + kwargs["messages"][0]["content"],
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+
+        def __init__(self) -> None:
+            self.completions = self.CompletionsNamespace()
+
+
+def test_eval_gives_each_record_its_own_trace_with_its_model_calls_under_it(
+    eval_setup, run_eval, tracing
+):
+    mock_scrapi = eval_setup
+    openai = wrap_openai(_AsyncEchoOpenAI())
+
+    async def task(input):
+        completion = await openai.chat.completions.create(
+            model="gpt-test", messages=[{"role": "user", "content": input}]
+        )
+        return completion["choices"][0]["message"]["content"]
+
+    with tracing.provider.get_tracer("test").start_as_current_span("outer") as outer:
+        result = run_eval(
+            "greeting",
+            data=[{"input": "Foo"}, {"input": "Bar"}, {"input": "Baz"}],
+            task=task,
+            scorer=lambda args: args.output == "Hello Foo",
+            eval_run_name="run-traces",
+        )
+    outer_trace_id = trace.format_trace_id(outer.get_span_context().trace_id)
+
+    assert len(tracing.spans()) == 9
+    trace_ids = {r.trace_id for r in result.results}
+    assert len(trace_ids) == 3
+    assert outer_trace_id not in trace_ids
+
+    payload_results = mock_scrapi.get_eval_payloads()[0]["results"]
+    for index, record in enumerate(result.results):
+        assert payload_results[index]["input"] == record.input
+        assert payload_results[index]["traceID"] == record.trace_id
+        assert payload_results[index]["spanID"] == record.span_id
+
+        record_span = tracing.span(record.span_id)
+        assert _trace_id(record_span) == record.trace_id
+        assert record_span.parent is None
+        assert record_span.name == "invoke_workflow"
+        attrs = dict(record_span.attributes or {})
+        assert attrs[STATSIG_ATTR_SPAN_TYPE] == StatsigSpanType.GEN_AI
+        assert attrs[STATSIG_ATTR_GEN_AI_SPAN_TYPE] == StatsigGenAISpanType.WORKFLOW
+        assert attrs["statsig.gen_ai.workflow.name"] == "greeting"
+        assert attrs[STATSIG_ATTR_SPAN_LLM_ROOT] == STATSIG_SPAN_LLM_ROOT_VALUE
+        assert attrs[STATSIG_ATTR_ENVIRONMENT] == "eval"
+        assert attrs[STATSIG_ATTR_EVAL_NAME] == "greeting"
+        assert attrs[STATSIG_ATTR_EVAL_RUN_NAME] == "run-traces"
+        assert attrs[STATSIG_ATTR_EVAL_RECORD_INDEX] == index
+        assert record_span.status.status_code == StatusCode.OK
+
+        children = tracing.children(record.span_id)
+        assert sorted(
+            (s.name, (s.attributes or {}).get(STATSIG_ATTR_EVAL_SCORER_NAME)) for s in children
+        ) == [("chat gpt-test", None), ("invoke_workflow", "Grader")]
+        assert all(_trace_id(s) == record.trace_id for s in children)
+        [model_span] = [s for s in children if s.name == "chat gpt-test"]
+        assert STATSIG_ATTR_SPAN_LLM_ROOT not in (model_span.attributes or {})
+        assert (model_span.attributes or {})[STATSIG_ATTR_ENVIRONMENT] == "eval"
+
+    assert [r.output for r in result.results] == ["Hello Foo", "Hello Bar", "Hello Baz"]
+    assert [r.scores for r in result.results] == [{"Grader": 1.0}, {"Grader": 0.0}, {"Grader": 0.0}]
+
+
+def test_eval_keeps_a_sync_tasks_model_calls_under_the_record_span(eval_setup, run_eval, tracing):
+    openai = wrap_openai(MockOpenAI())
+
+    def task(input):
+        openai.chat.completions.create(model=f"model-{input}", messages=[])
+        return input
+
+    result = run_eval(
+        "sync task", data=[{"input": "a"}, {"input": "b"}], task=task, scorer=lambda args: 1
+    )
+
+    for record in result.results:
+        [model_span] = [s for s in tracing.spans() if s.name == f"chat model-{record.input}"]
+        assert _parent_id(model_span) == record.span_id
+        assert _trace_id(model_span) == record.trace_id
+        assert (model_span.attributes or {})[STATSIG_ATTR_ENVIRONMENT] == "eval"
+
+
+def test_eval_runs_each_scorer_in_a_child_span(eval_setup, run_eval, tracing):
+    lookup = wrap(lambda: "found", type="tool", name="lookup")
+
+    def exact(args):
+        lookup()
+        return args.output == "a"
+
+    async def length(args):
+        await asyncio.sleep(0)
+        return {"score": 1, "metadata": {"length": len(args.output)}}
+
+    result = run_eval(
+        "scorer spans",
+        data=[{"input": "a"}],
+        task=lambda input: input,
+        scorer={"exact": exact, "length": length},
+    )
+
+    [record] = result.results
+    assert record.scores == {"exact": 1.0, "length": 1.0}
+    scorer_spans = {
+        (s.attributes or {})[STATSIG_ATTR_EVAL_SCORER_NAME]: s
+        for s in tracing.children(record.span_id)
+    }
+    assert sorted(scorer_spans) == ["exact", "length"]
+    for scorer_name, span in scorer_spans.items():
+        attrs = dict(span.attributes or {})
+        assert span.name == "invoke_workflow"
+        assert attrs["statsig.gen_ai.workflow.name"] == scorer_name
+        assert attrs[STATSIG_ATTR_GEN_AI_SPAN_TYPE] == StatsigGenAISpanType.WORKFLOW
+        assert attrs[STATSIG_ATTR_ENVIRONMENT] == "eval"
+        assert STATSIG_ATTR_SPAN_LLM_ROOT not in attrs
+
+    [tool_span] = [s for s in tracing.spans() if s.name == "execute_tool"]
+    assert _parent_id(tool_span) == _span_id(scorer_spans["exact"])
+
+
+def test_eval_marks_the_record_span_as_failed_when_the_task_raises(
+    eval_setup, run_eval, tracing
+):
+    mock_scrapi = eval_setup
+
+    def task(input):
+        raise ValueError("Task failed")
+
+    result = run_eval("failing", data=[{"input": "Boom"}], task=task, scorer=lambda args: 1)
+
+    [record] = result.results
+    assert record.error == True
+    assert record.output == "[Error]"
+    assert record.scores == {"Grader": 0.0}
+    assert record.trace_id is not None and record.span_id is not None
+    record_span = tracing.span(record.span_id)
+    assert record_span.status.status_code == StatusCode.ERROR
+    assert record_span.status.description == "Task failed"
+    assert tracing.children(record.span_id) == []
+
+    [payload_record] = mock_scrapi.get_eval_payloads()[0]["results"]
+    assert payload_record["traceID"] == record.trace_id
+    assert payload_record["spanID"] == record.span_id
+
+
+def test_eval_tags_spans_from_tasks_and_scorers_with_the_eval_environment(
+    eval_setup, run_eval, tracing
+):
+    async def task(input):
+        await asyncio.sleep(0)
+        return input
+
+    run_eval(
+        "environment task",
+        data=[{"input": "Foo"}],
+        task=wrap(task, type="tool", name="task-tool"),
+        scorer=wrap(lambda args: 1, type="tool", name="scorer-tool"),
+    )
+    wrap(lambda: "done", type="tool", name="outside-tool")()
+    tracing.provider.force_flush()
+
+    environment_by_tool = {
+        (s.attributes or {})["statsig.gen_ai.tool.name"]: (s.attributes or {}).get(
+            STATSIG_ATTR_ENVIRONMENT
+        )
+        for s in tracing.spans()
+        if "statsig.gen_ai.tool.name" in (s.attributes or {})
+    }
+    assert environment_by_tool == {
+        "task-tool": "eval",
+        "scorer-tool": "eval",
+        "outside-tool": None,
+    }
+
+
+def test_eval_flushes_the_record_spans_before_sending_results(
+    eval_setup, run_eval, tracing, monkeypatch
+):
+    import requests
+
+    exported_at_send = []
+    post = requests.post
+
+    def recording_post(url, *args, **kwargs):
+        exported_at_send.append(len(tracing.spans()))
+        return post(url, *args, **kwargs)
+
+    monkeypatch.setattr(requests, "post", recording_post)
+
+    run_eval("flush", data=[{"input": "a"}, {"input": "b"}], task=lambda i: i, scorer=lambda a: 1)
+
+    # A record span and a scorer span for each record.
+    assert exported_at_send == [4]
+
+
+def test_eval_sends_results_when_the_flush_fails(
+    eval_setup, run_eval, tracing, monkeypatch, caplog
+):
+    mock_scrapi = eval_setup
+
+    def failing_flush():
+        raise RuntimeError("exporter down")
+
+    monkeypatch.setattr(OtelSingleton, "flush_instance", failing_flush)
+
+    result = run_eval("flush fails", data=[{"input": "a"}], task=lambda i: i, scorer=lambda a: 1)
+
+    assert result.results[0].trace_id is not None
+    assert len(mock_scrapi.get_eval_payloads()) == 1
+    assert "Failed to flush eval spans: exporter down" in caplog.text
+
+
+def test_eval_called_from_a_running_event_loop_keeps_the_callers_context(eval_setup, tracing):
+    openai = wrap_openai(MockOpenAI())
+    user = StatsigUser(user_id="user-123")
+
+    def task(input):
+        openai.chat.completions.create(model="gpt-test", messages=[])
+        return input
+
+    async def main():
+        tracer = tracing.provider.get_tracer("test")
+        with statsig_user_context(user), tracer.start_as_current_span("outer"):
+            # Runs on a new event loop in another thread.
+            return Eval("from a loop", data=[{"input": "a"}], task=task, scorer=lambda args: 1)
+
+    [record] = asyncio.run(main()).results
+
+    record_span = tracing.span(record.span_id)
+    assert record_span.parent is None
+    assert (record_span.attributes or {})[STATSIG_ATTR_USER_ID] == "user-123"
+    [model_span] = [s for s in tracing.spans() if s.name == "chat gpt-test"]
+    assert _parent_id(model_span) == record.span_id
+    assert (model_span.attributes or {})[STATSIG_ATTR_USER_ID] == "user-123"
+
+
+@pytest.mark.parametrize("wrap_task", [_sync_task, _async_task], ids=["sync", "async"])
+def test_eval_without_tracing_runs_in_the_eval_environment_without_a_trace(
+    eval_setup, run_eval, wrap_task, monkeypatch
+):
+    mock_scrapi = eval_setup
+    monkeypatch.setattr(OtelSingleton, "_instance", None)
+    flushes = []
+    monkeypatch.setattr(OtelSingleton, "flush_instance", lambda: flushes.append(True))
+    seen = []
+
+    def observe(where):
+        seen.append(
+            (
+                where,
+                get_environment_span_attrs_from_context(),
+                trace.get_current_span().get_span_context().is_valid,
+            )
+        )
+
+    def task(input):
+        observe("task")
+        return input
+
+    def scorer(args):
+        observe("scorer")
+        return 1
+
+    result = run_eval("no tracing", data=[{"input": "a"}], task=wrap_task(task), scorer=scorer)
+
+    eval_environment = {STATSIG_ATTR_ENVIRONMENT: "eval"}
+    assert seen == [("task", eval_environment, False), ("scorer", eval_environment, False)]
+    assert get_environment_span_attrs_from_context() is None
+    [record] = result.results
+    assert record.trace_id is None and record.span_id is None
+    [payload_record] = mock_scrapi.get_eval_payloads()[0]["results"]
+    assert "traceID" not in payload_record and "spanID" not in payload_record
+    assert flushes == []

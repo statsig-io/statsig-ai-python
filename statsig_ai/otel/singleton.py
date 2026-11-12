@@ -23,6 +23,11 @@ class OtelSingleton:
         return cls._instance
 
     @classmethod
+    def is_initialized(cls) -> bool:
+        """Whether initialize_tracing() has set up tracing."""
+        return cls._instance is not None
+
+    @classmethod
     def get_instance(cls):
         if cls._instance is not None:
             return cls._instance

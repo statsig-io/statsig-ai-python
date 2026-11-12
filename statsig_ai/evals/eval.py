@@ -1,9 +1,12 @@
 import asyncio
+import contextvars
+import functools
 import inspect
 import logging
 import os
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from typing import (
     Any,
     AsyncIterator,
@@ -11,7 +14,9 @@ from typing import (
     Callable,
     Dict,
     Iterable,
+    Iterator,
     List,
+    Mapping,
     Optional,
     Tuple,
     TypeVar,
@@ -21,8 +26,19 @@ from typing import (
 
 import json
 import requests
+from opentelemetry import context as otel_context
+from opentelemetry import trace
 from tqdm.auto import tqdm
 
+from ..otel.conventions import (
+    STATSIG_ATTR_EVAL_NAME,
+    STATSIG_ATTR_EVAL_RECORD_INDEX,
+    STATSIG_ATTR_EVAL_RUN_NAME,
+    STATSIG_ATTR_EVAL_SCORER_NAME,
+)
+from ..otel.environment_context import statsig_environment
+from ..otel.singleton import OtelSingleton
+from ..wrappers.wrap_call import start_workflow, wrap
 from .serializable_data_class import SerializableDataClass
 from .eval_types import (
     EvalDataRecord,
@@ -196,6 +212,10 @@ def _serialize_record(record: EvalResultRecordWithMetadata[Input, Output]) -> Di
         serialized["category"] = SerializableDataClass._serialize_value(record.category)
     if record.row_id is not None:
         serialized["rowID"] = record.row_id
+    if record.trace_id is not None:
+        serialized["traceID"] = record.trace_id
+    if record.span_id is not None:
+        serialized["spanID"] = record.span_id
     return serialized
 
 
@@ -264,36 +284,24 @@ def _run_summary_scorer(
         return None
 
 
-async def _run_task(
-    task: EvalTask[Input, Output],
-    input_value: Input,
-    hook: EvalHook,
-) -> Tuple[Output, bool]:
-    """Run the task on one input. Returns the output and whether the task failed."""
-    sig = inspect.signature(task)
-    params = list(sig.parameters.values())
-    num_args = len(params)
-
+def _get_task_args(
+    task: EvalTask[Input, Output], input_value: Input, hook: EvalHook
+) -> Tuple[Any, ...]:
+    num_args = len(inspect.signature(task).parameters)
     if num_args == 1:
-        args: Any = (input_value,)
-    elif num_args >= 2:
-        args = (input_value, hook)
-    else:
-        raise TypeError(f"Invalid task signature: expected 1 or 2 parameters, got {num_args}")
+        return (input_value,)
+    if num_args >= 2:
+        return (input_value, hook)
+    raise TypeError(f"Invalid task signature: expected 1 or 2 parameters, got {num_args}")
 
-    try:
-        if inspect.iscoroutinefunction(task):
-            return await task(*args), False
 
-        event_loop = asyncio.get_event_loop()
-
-        def sync_call() -> Output:
-            return task(*args)  # type: ignore
-
-        return await event_loop.run_in_executor(None, sync_call), False
-    except Exception as err:
-        logging.warning("[Statsig] Task failed: %s | input=%r", err, input_value)
-        return cast(Output, _TASK_ERROR_OUTPUT), True
+async def _run_task(task: EvalTask[Input, Output], args: Tuple[Any, ...]) -> Output:
+    """Run the task on one input. Exceptions propagate."""
+    if inspect.iscoroutinefunction(task):
+        return await task(*args)
+    # Unlike run_in_executor, to_thread copies the context into the thread, so the
+    # model calls of a sync task join the record's trace and environment.
+    return cast(Output, await asyncio.to_thread(task, *args))
 
 
 async def _run_scorer(
@@ -372,47 +380,120 @@ async def _run_scorer(
         return ScoreWithMetadata(score=0.0, metadata=None)
 
 
+def _get_active_span_ids() -> Tuple[Optional[str], Optional[str]]:
+    span_context = trace.get_current_span().get_span_context()
+    if not span_context.is_valid:
+        return None, None
+    return trace.format_trace_id(span_context.trace_id), trace.format_span_id(span_context.span_id)
+
+
+@contextmanager
+def _start_record_trace(
+    name: str, attributes: Mapping[str, Any]
+) -> Iterator[Tuple[Optional[str], Optional[str]]]:
+    """
+    Runs the block in a new root workflow span, so every record gets its own trace
+    even when Eval() is called inside another span. Only the active span is removed
+    from the context; the user, prompt and environment stay. Yields the trace and
+    span IDs of the record span.
+    """
+    token = otel_context.attach(trace.set_span_in_context(trace.INVALID_SPAN))
+    try:
+        with start_workflow(name, attributes=attributes):
+            yield _get_active_span_ids()
+    finally:
+        otel_context.detach(token)
+
+
+def _start_scorer_span(scorer_name: str, score: Callable[[], Awaitable[T]]) -> Awaitable[T]:
+    return wrap(
+        score,
+        type="workflow",
+        name=scorer_name,
+        attributes={STATSIG_ATTR_EVAL_SCORER_NAME: scorer_name},
+    )()
+
+
+def _get_record_span_attributes(
+    name: str, eval_run_name: Optional[str], record_index: int
+) -> Dict[str, Any]:
+    attributes: Dict[str, Any] = {
+        STATSIG_ATTR_EVAL_NAME: name,
+        STATSIG_ATTR_EVAL_RECORD_INDEX: record_index,
+    }
+    if eval_run_name is not None:
+        attributes[STATSIG_ATTR_EVAL_RUN_NAME] = eval_run_name
+    return attributes
+
+
 async def _run_task_and_score_one_record(
+    name: str,
     task: EvalTask[Input, Output],
     scorers: ScorerFnMap[Input, Output],
     data_record: EvalDataRecord[Input, Output],
     parameters: Optional[EvalParameters],
+    record_span_attributes: Optional[Dict[str, Any]],
 ) -> EvalResultRecordWithMetadata[Input, Output]:
     """Run task and score for one record asynchronously.
 
-    Runs the task first, then runs all scorers concurrently on the output.
+    Runs the task first, then runs all scorers concurrently on the output, inside
+    `statsig_environment("eval")`. With `record_span_attributes` (tracing is
+    initialized), the record runs in its own trace and each scorer in a child span.
     - If task errors: all scores are 0 and error flag is set
     - If a scorer errors: that score is "0" (handled in _run_scorer)
     """
-    output, task_failed = await _run_task(
+    trace_records = record_span_attributes is not None
+    task_args = _get_task_args(
         task, data_record.input, EvalHook(parameters=parameters, category=data_record.category)
     )
+    output: Any = None
+    scores: Dict[str, ScoreWithMetadata] = {}
+    error = False
+    trace_id: Optional[str] = None
+    span_id: Optional[str] = None
 
-    if task_failed:
-        return EvalResultRecordWithMetadata(
-            input=data_record.input,
-            expected=data_record.expected,
-            category=data_record.category,
-            row_id=data_record.row_id,
-            output=output,
-            scores={name: ScoreWithMetadata(score=0.0, metadata=None) for name in scorers.keys()},
-            error=True,
+    async def run_task_and_scorers() -> None:
+        nonlocal output
+        task_output = await _run_task(task, task_args)
+        output = task_output
+
+        def score(
+            scorer_name: str, scorer_fn: Scorer[Input, Output]
+        ) -> Awaitable[ScoreWithMetadata]:
+            run = functools.partial(_run_scorer, scorer_name, scorer_fn, task_output, data_record)
+            return _start_scorer_span(scorer_name, run) if trace_records else run()
+
+        score_results = await asyncio.gather(
+            *(score(scorer_name, scorer_fn) for scorer_name, scorer_fn in scorers.items())
         )
+        scores.update(zip(scorers.keys(), score_results))
 
-    scorer_tasks = [
-        _run_scorer(scorer_name, scorer_fn, output, data_record)
-        for scorer_name, scorer_fn in scorers.items()
-    ]
-    score_results = await asyncio.gather(*scorer_tasks)
+    try:
+        with statsig_environment("eval"):
+            if record_span_attributes is None:
+                await run_task_and_scorers()
+            else:
+                with _start_record_trace(name, record_span_attributes) as (trace_id, span_id):
+                    await run_task_and_scorers()
+    except Exception as err:
+        logging.warning("[Statsig] Task failed: %s | input=%r", err, data_record.input)
+        if output is None:
+            output = _TASK_ERROR_OUTPUT
+        error = True
+        scores = {
+            scorer_name: ScoreWithMetadata(score=0.0, metadata=None) for scorer_name in scorers
+        }
 
     return EvalResultRecordWithMetadata(
         input=data_record.input,
         expected=data_record.expected,
         category=data_record.category,
         row_id=data_record.row_id,
-        output=output,
-        scores=dict(zip(scorers.keys(), score_results)),
-        error=False,
+        output=cast(Output, output),
+        scores=scores,
+        error=error,
+        trace_id=trace_id,
+        span_id=span_id,
     )
 
 
@@ -435,6 +516,8 @@ def _convert_results_to_results_without_metadata(
         error=result.error,
         category=result.category,
         row_id=result.row_id,
+        trace_id=result.trace_id,
+        span_id=result.span_id,
     ) for result in results_with_metadata]
     return results_without_metadata
 
@@ -480,14 +563,23 @@ async def _run_eval_helper(
         _assert_dataset_row_ids(records)
 
     resolved_parameters = _resolve_parameters(parameters)
+    # Without initialize_tracing() there is no exporter, so records aren't traced.
+    trace_records = OtelSingleton.is_initialized()
 
     tasks: List[asyncio.Task[EvalResultRecordWithMetadata[Input, Output]]] = []
 
-    for record in records:
+    for record_index, record in enumerate(records):
         tasks.append(
             asyncio.create_task(
                 _run_task_and_score_one_record(
-                    task, normalized_scorers, record, resolved_parameters
+                    name,
+                    task,
+                    normalized_scorers,
+                    record,
+                    resolved_parameters,
+                    _get_record_span_attributes(name, eval_run_name, record_index)
+                    if trace_records
+                    else None,
                 )
             )
         )
@@ -507,6 +599,14 @@ async def _run_eval_helper(
     results_without_metadata = _convert_results_to_results_without_metadata(results)
 
     summary_scores = _run_summary_scorer(summary_score_fn, results_without_metadata)
+
+    if trace_records:
+        # Export the record spans before returning, so they aren't lost if the process
+        # exits right after the eval.
+        try:
+            OtelSingleton.flush_instance()
+        except Exception as err:
+            logging.warning("[Statsig] Failed to flush eval spans: %s", err)
 
     _send_eval_results(
         name, results, api_key, eval_run_name, summary_scores, resolved_parameters, dataset
@@ -587,8 +687,11 @@ def Eval(
                 new_loop.close()
                 asyncio.set_event_loop(None)
 
+        # Copy the caller's context into the thread, so the records keep its user,
+        # prompt and environment context.
+        caller_context = contextvars.copy_context()
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_in_new_loop)
+            future = executor.submit(caller_context.run, run_in_new_loop)
             return future.result()
 
     else:
