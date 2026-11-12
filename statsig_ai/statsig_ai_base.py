@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, Union
 from opentelemetry import trace
 from statsig_python_core import Statsig, StatsigOptions
 from .prompt import make_prompt, PromptEvaluationOptions, Prompt
+from .agents import AgentConfig, make_agent_config
 from .ai_eval_grade_data import AIEvalGradeData
 from .prompt_version import PromptVersion
 from .otel.conventions import STATSIG_ATTR_ACTIVITY_ID
@@ -99,6 +100,10 @@ class StatsigAIInstance:
         prompt_name = current_param_store_name.split(":")[1]
 
         return make_prompt(self._statsig, prompt_name, final_param_store, user)
+
+    def get_agent_config(self, user: Any, agent_config_name: str) -> AgentConfig:
+        param_store = self._statsig.get_parameter_store(user, f"agent:{agent_config_name}")
+        return make_agent_config(self._statsig, agent_config_name, param_store, user)
 
     def log_eval_grade(
         self,

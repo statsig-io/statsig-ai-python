@@ -33,6 +33,34 @@ The AI SDK provides convenient hooks for developers working with LLMs to iterate
 
 Read through the [Documentation](https://docs.statsig.com/ai-evals/python?ref=gh_ai) to see code samples and how to get started.
 
+## Agent configs
+
+`get_agent_config(user, name)` returns the agent config named `name` for the user. `get_live()` returns the agent version the user is served, and `get_candidates()` the versions you're testing against it. Each version's `get_root()` returns the `PromptVersion` of its root prompt, which you read the same way as a prompt's versions.
+
+```python
+from statsig_ai import StatsigUser
+
+user = StatsigUser(user_id="user-123")
+agent_config = statsig_ai.get_agent_config(user, "support_agent")
+
+root = agent_config.get_live().get_root()
+response = openai.chat.completions.create(
+    model=root.get_model(),
+    messages=root.get_prompt_messages({"input": user_input}),
+)
+
+for candidate in agent_config.get_candidates():
+    print(candidate.get_root().get_name())
+```
+
+To grade a run, pass the version's root to `log_eval_grade`. Grades for the live version's root are logged with `is_live` set to `true`, and grades for a candidate's root with `false`.
+
+```python
+statsig_ai.log_eval_grade(user, root, 0.9, "helpfulness", {"session_id": session_id})
+```
+
+If there's no agent config with that name, `get_agent_config` still returns one. Its live version's root is an empty `PromptVersion`, and it has no candidates.
+
 ## Tracing
 
 `initialize_tracing()` sends OpenTelemetry spans to Statsig, and `wrap_openai()` records each OpenAI call as a span. The tracer provider it creates uses `StatsigSpanProcessor`, which adds the user and environment attributes below to every span when it starts.

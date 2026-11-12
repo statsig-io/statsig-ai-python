@@ -3094,6 +3094,150 @@
       "entity": "dynamic_config",
       "version": 1
     },
+    "prompt:2nKw6Ty8VbR3mXc1Jq5Lh7": {
+      "type": "dynamic_config",
+      "salt": "e1b7c3d9-5f2a-4c86-a0e4-3d9b7f1c5a28",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "role": "system",
+            "content": "You are a support agent. {{input}}"
+          }
+        ],
+        "name": "Agent Version 1",
+        "temperature": 0.5,
+        "maxTokens": 2000,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-4.1",
+        "workflowBody": {},
+        "evalModel": "gpt-4o-mini",
+        "type": "Live",
+        "aiConfigName": "test_agent"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "prompt:6sPd0Hz4QfM9kWa2Ny8Ec3": {
+      "type": "dynamic_config",
+      "salt": "7c4e2a8f-9b1d-4d35-86f2-1a5c3e7b9d40",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "role": "system",
+            "content": "You are a concise support agent. {{input}}"
+          }
+        ],
+        "name": "Agent Version 2",
+        "temperature": 1,
+        "maxTokens": 2000,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-5",
+        "workflowBody": {},
+        "evalModel": "gpt-4o-mini",
+        "type": "Candidate",
+        "aiConfigName": "test_agent"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "prompt:4tLj9Gv1XeB7rUo5Kc2Sm6": {
+      "type": "dynamic_config",
+      "salt": "2d9f6b3e-4a7c-4b12-9d58-6e1a8c4f2b97",
+      "enabled": true,
+      "defaultValue": {
+        "prompts": [
+          {
+            "role": "system",
+            "content": "You are a friendly support agent. {{input}}"
+          }
+        ],
+        "name": "Agent Version 3",
+        "temperature": 1,
+        "maxTokens": 2000,
+        "topP": 1,
+        "frequencyPenalty": 0,
+        "presencePenalty": 0,
+        "provider": "openai",
+        "model": "gpt-5-mini",
+        "workflowBody": {},
+        "evalModel": "gpt-4o-mini",
+        "type": "Candidate",
+        "aiConfigName": "test_agent"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "agent:3vQm8Lr2XkT9pZc4Hn7Wd1": {
+      "type": "dynamic_config",
+      "salt": "5f0c7d9e-2b1a-4e63-9c8d-7a4b3e2f1d06",
+      "enabled": true,
+      "defaultValue": {
+        "root": "prompt:2nKw6Ty8VbR3mXc1Jq5Lh7",
+        "agents": [
+          {
+            "name": "support_agent",
+            "handoffs": [],
+            "tools": []
+          }
+        ]
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "agent:5bYe2Fs9JuN6qRa8Mk3Vt0": {
+      "type": "dynamic_config",
+      "salt": "a3e9b1c7-6d24-4f58-8e0a-2c7d9f1b4e53",
+      "enabled": true,
+      "defaultValue": {
+        "root": "prompt:6sPd0Hz4QfM9kWa2Ny8Ec3",
+        "agents": [
+          {
+            "name": "support_agent",
+            "handoffs": [],
+            "tools": []
+          }
+        ]
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
+    "agent:1hGx7Dp4WcL0sTe5Bz9Qr2": {
+      "type": "dynamic_config",
+      "salt": "c8d2f4a6-1e3b-4a97-b5c0-9e6f2d8a7b14",
+      "enabled": true,
+      "defaultValue": {
+        "root": "prompt:4tLj9Gv1XeB7rUo5Kc2Sm6",
+        "agents": [
+          {
+            "name": "support_agent",
+            "handoffs": [],
+            "tools": []
+          }
+        ]
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "dynamic_config",
+      "version": 1
+    },
     "big_number": {
       "type": "dynamic_config",
       "salt": "d3cf0a17-42dd-45cb-affe-00a7ac89a545",
@@ -5532,6 +5676,18 @@
       "idType": "userID",
       "entity": "layer",
       "version": 2
+    },
+    "test_agent": {
+      "type": "dynamic_config",
+      "salt": "b6a1d4e8-3c9f-4e27-a8b5-0f2d6c9e1a73",
+      "enabled": true,
+      "defaultValue": {
+        "live": "agent:3vQm8Lr2XkT9pZc4Hn7Wd1"
+      },
+      "rules": [],
+      "idType": "userID",
+      "entity": "layer",
+      "version": 1
     },
     "test_layer_in_holdout": {
       "type": "dynamic_config",
@@ -15070,6 +15226,28 @@
       },
       "targetAppIDs": [],
       "version": 4
+    },
+    "agent:test_agent": {
+      "parameters": {
+        "live": {
+          "name": "live",
+          "param_type": "object",
+          "ref_type": "layer",
+          "layer_name": "test_agent",
+          "param_name": "live"
+        },
+        "candidates": {
+          "name": "candidates",
+          "param_type": "array",
+          "ref_type": "static",
+          "value": [
+            "agent:5bYe2Fs9JuN6qRa8Mk3Vt0",
+            "agent:1hGx7Dp4WcL0sTe5Bz9Qr2"
+          ]
+        }
+      },
+      "targetAppIDs": [],
+      "version": 1
     }
   },
   "session_replay_info": {

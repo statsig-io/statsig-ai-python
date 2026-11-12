@@ -2,7 +2,14 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import format_span_id, format_trace_id
 from statsig_python_core import StatsigOptions, StatsigUser
 from pytest_httpserver import HTTPServer
-from statsig_ai import OtelSingleton, PromptVersion, StatsigAI, StatsigCreateConfig
+from statsig_ai import (
+    AgentConfig,
+    AgentVersion,
+    OtelSingleton,
+    PromptVersion,
+    StatsigAI,
+    StatsigCreateConfig,
+)
 from utils import get_test_data_resource
 import pytest
 from mock_scrapi import MockScrapi
@@ -213,6 +220,119 @@ def test_log_eval_grade_reasoning_metadata_and_activity_id(statsig_setup):
         "companyID": "c-1",
         "statsig.activity_id": "activity-123",
     }
+
+
+def _get_agent_config(statsig_setup, agent_config_name="test_agent"):
+    options, _ = statsig_setup
+    statsig_ai = StatsigAI(
+        statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
+    )
+    statsig_ai.initialize()
+    agent_config = statsig_ai.get_agent_config(StatsigUser("a-user"), agent_config_name)
+    statsig_ai.shutdown()
+    return agent_config
+
+
+def test_get_agent_config(statsig_setup):
+    agent_config = _get_agent_config(statsig_setup)
+    assert isinstance(agent_config, AgentConfig)
+    assert agent_config.get_name() == "test_agent"
+    assert isinstance(agent_config.get_live(), AgentVersion)
+    assert len(agent_config.get_candidates()) == 2
+    assert all(isinstance(c, AgentVersion) for c in agent_config.get_candidates())
+
+
+def test_get_agent_config_live_root(statsig_setup):
+    root = _get_agent_config(statsig_setup).get_live().get_root()
+    assert isinstance(root, PromptVersion)
+    assert root.get_id() == "2nKw6Ty8VbR3mXc1Jq5Lh7"
+    assert root.get_name() == "Agent Version 1"
+    assert root.get_type() == "Live"
+    assert root.get_prompt_name() == "test_agent"
+    assert root.get_provider() == "openai"
+    assert root.get_model() == "gpt-4.1"
+    assert root.get_temperature() == 0.5
+    assert root.get_max_tokens() == 2000
+    assert root.get_top_p() == 1
+    assert root.get_frequency_penalty() == 0
+    assert root.get_presence_penalty() == 0
+    assert root.get_eval_model() == "gpt-4o-mini"
+    assert root.get_workflow_body() == {}
+    assert root.get_prompt_messages({"input": "Where is my order?"}) == [
+        {"role": "system", "content": "You are a support agent. Where is my order?"}
+    ]
+    assert root.is_live_for_user is True
+
+
+def test_get_agent_config_candidate_roots(statsig_setup):
+    candidates = _get_agent_config(statsig_setup).get_candidates()
+    roots = [c.get_root() for c in candidates]
+    assert [r.get_id() for r in roots] == ["6sPd0Hz4QfM9kWa2Ny8Ec3", "4tLj9Gv1XeB7rUo5Kc2Sm6"]
+    assert [r.get_name() for r in roots] == ["Agent Version 2", "Agent Version 3"]
+    assert [r.get_model() for r in roots] == ["gpt-5", "gpt-5-mini"]
+    assert all(r.get_type() == "Candidate" for r in roots)
+    assert all(r.get_prompt_name() == "test_agent" for r in roots)
+    assert all(r.is_live_for_user is False for r in roots)
+
+
+def test_get_agent_config_missing(statsig_setup):
+    # As in the Node SDK, a missing agent config still returns an AgentConfig: the live
+    # version's root is an empty prompt version, and there are no candidates.
+    agent_config = _get_agent_config(statsig_setup, "missing_agent")
+    assert agent_config.get_name() == "missing_agent"
+    assert agent_config.get_candidates() == []
+    root = agent_config.get_live().get_root()
+    assert isinstance(root, PromptVersion)
+    assert root.get_id() == ""
+    assert root.get_name() == ""
+    assert root.get_prompt_name() == ""
+    assert root.get_model() == ""
+    assert root.is_live_for_user is True
+
+
+def test_get_agent_config_is_not_a_prompt(statsig_setup):
+    # Agent configs live under `agent:<name>`, so a prompt's name doesn't resolve to one.
+    agent_config = _get_agent_config(statsig_setup, "test_prompt")
+    assert agent_config.get_live().get_root().get_id() == ""
+    assert agent_config.get_candidates() == []
+
+
+@pytest.mark.parametrize(
+    "use_candidate, expected_is_live, expected_version_name, expected_version_id",
+    [
+        (False, "true", "Agent Version 1", "2nKw6Ty8VbR3mXc1Jq5Lh7"),
+        (True, "false", "Agent Version 2", "6sPd0Hz4QfM9kWa2Ny8Ec3"),
+    ],
+)
+def test_log_eval_grade_with_agent_root(
+    statsig_setup, use_candidate, expected_is_live, expected_version_name, expected_version_id
+):
+    options, mock_scrapi = statsig_setup
+    statsig_ai = StatsigAI(
+        statsig_source=StatsigCreateConfig(sdk_key="secret-key", statsig_options=options)
+    )
+    statsig_ai.initialize()
+    user = StatsigUser("a-user")
+    agent_config = statsig_ai.get_agent_config(user, "test_agent")
+    version = agent_config.get_candidates()[0] if use_candidate else agent_config.get_live()
+    statsig_ai.log_eval_grade(
+        user, version.get_root(), 0.75, "test_grader", {"session_id": "s-1"}
+    )
+    statsig_ai.shutdown()
+
+    eval_events = [
+        e for e in mock_scrapi.get_logged_events() if e["eventName"] == "statsig::eval_result"
+    ]
+    assert len(eval_events) == 1
+    assert eval_events[0]["value"] == "test_agent"
+    metadata = eval_events[0]["metadata"]
+    assert metadata["is_live"] == expected_is_live
+    assert metadata["version_name"] == expected_version_name
+    assert metadata["version_id"] == expected_version_id
+    assert metadata["ai_config_name"] == "test_agent"
+    assert metadata["score"] == "0.75"
+    assert metadata["grader_name"] == "test_grader"
+    assert metadata["session_id"] == "s-1"
 
 
 class _FlushRecordingProvider(TracerProvider):
