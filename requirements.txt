@@ -9,5 +9,6 @@ pytest-httpserver
 pytest-asyncio
 werkzeug
 openai
+anthropic
 typing_extensions>=4.1.0
 tqdm

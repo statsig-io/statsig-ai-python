@@ -63,7 +63,7 @@ If there's no agent config with that name, `get_agent_config` still returns one.
 
 ## Tracing
 
-`initialize_tracing()` sends OpenTelemetry spans to Statsig, and `wrap_openai()` and `wrap_gemini()` record each OpenAI or Gemini call as a span. The tracer provider it creates uses `StatsigSpanProcessor`, which adds the user and environment attributes below to every span when it starts.
+`initialize_tracing()` sends OpenTelemetry spans to Statsig, and `wrap_openai()`, `wrap_anthropic()` and `wrap_gemini()` record each OpenAI, Anthropic or Gemini call as a span. The tracer provider it creates uses `StatsigSpanProcessor`, which adds the user and environment attributes below to every span when it starts.
 
 Messages are only recorded when you opt in with `GenAICaptureOptions` (for example `wrap_openai(OpenAI(), WrapOpenAIOptions(GenAICaptureOptions(capture_all=True)))`). `gen_ai.input.messages`, `gen_ai.output.messages` and `gen_ai.system_instructions` are recorded in the [OpenTelemetry GenAI message format](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/) (`role` + `parts` such as `text`, `tool_call` and `tool_call_response`). System and developer messages, and the Responses API `instructions`, are recorded as system instructions rather than input messages.
 
@@ -115,6 +115,40 @@ async def stream_reply() -> None:
 - A streamed call's span ends once you've consumed the stream. Its chunks are merged into one response, with the text of each candidate joined.
 - If a call raises, the span records the exception and an `ERROR` status, and the exception is raised again.
 - Chat sessions (`client.chats`) aren't traced.
+
+### Tracing Anthropic calls
+
+`wrap_anthropic()` wraps an [anthropic](https://pypi.org/project/anthropic/) `Anthropic` or `AsyncAnthropic` client. It records `client.messages.create`, including `stream=True`, and `client.messages.stream` as `chat <model>` spans with `gen_ai.provider.name=anthropic`, and logs a `statsig::gen_ai` event for each call. It takes the same `WrapOpenAIOptions` as `wrap_openai()`. anthropic isn't a dependency of this SDK, so install it yourself.
+
+```python
+from anthropic import Anthropic
+from statsig_ai import GenAICaptureOptions, WrapOpenAIOptions, wrap_anthropic
+
+client = wrap_anthropic(Anthropic(), WrapOpenAIOptions(GenAICaptureOptions(capture_all=True)))
+
+message = client.messages.create(
+    model="claude-opus-5-5",
+    max_tokens=16000,
+    system="Answer in one sentence.",
+    messages=[{"role": "user", "content": "Is checkout on?"}],
+)
+
+with client.messages.stream(
+    model="claude-opus-5-5",
+    max_tokens=16000,
+    messages=[{"role": "user", "content": "Hi"}],
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="")
+```
+
+- `messages` is recorded as input messages, and `system` as system instructions. `tool_use` blocks are recorded as `tool_call` parts, thinking blocks as `reasoning` parts, and a user message of `tool_result` blocks as a `tool` message of `tool_call_response` parts.
+- The output message's finish reason is `stop` for `end_turn` and `stop_sequence`, `length` for `max_tokens`, `tool_call` for `tool_use`, `content_filter` for `refusal`, and otherwise the stop reason. `gen_ai.response.finish_reasons` keeps Anthropic's own `stop_reason`.
+- `gen_ai.usage.input_tokens` includes cache reads and cache writes. Cache reads are also recorded as `statsig.gen_ai.usage.input_cached_tokens`.
+- A streamed call records the message rebuilt from its events, so it has the same output, tool calls and usage as a call that isn't streamed. Its span ends once you've read the stream to the end, or when you close it. The stream keeps the SDK's own attributes, such as `response` and `close()`.
+- A `messages.stream()` span starts when the `with` block sends the request, and ends once the stream is read, whether you iterate it, read `text_stream` or call `get_final_message()`. If the block exits before the message is complete, the span gets an `ERROR` status.
+- If a call raises, the span records the exception and an `ERROR` status, and the exception is raised again.
+- `client.beta.messages`, `messages.with_raw_response` and `messages.batches` aren't traced.
 
 ### Tracing workflows and tools
 
@@ -177,7 +211,7 @@ with statsig_user_context(user):
     handle_request(request)
 ```
 
-`statsig_context(StatsigContext(user=..., activity_id=...))` tags wrapped OpenAI and Gemini calls and `wrap` spans with the same attributes, plus the activity ID in `statsig.custom_ids`.
+`statsig_context(StatsigContext(user=..., activity_id=...))` tags wrapped OpenAI, Anthropic and Gemini calls and `wrap` spans with the same attributes, plus the activity ID in `statsig.custom_ids`.
 
 ### Tagging calls with a prompt version
 

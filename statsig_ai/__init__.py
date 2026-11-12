@@ -17,6 +17,7 @@ from .evals import (
 from .wrappers import (
     wrap_openai,
     wrap_gemini,
+    wrap_anthropic,
     WrapOpenAIOptions,
     GenAICaptureOptions,
     wrap,
@@ -73,6 +74,7 @@ __all__ = [
     # Wrappers
     "wrap_openai",
     "wrap_gemini",
+    "wrap_anthropic",
     "WrapOpenAIOptions",
     "GenAICaptureOptions",
     "wrap",

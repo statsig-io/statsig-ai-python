@@ -21,6 +21,7 @@ test_deps = [
     "statsig-python-core>=0.19.4",
     "pytest-asyncio",
     "openai",
+    "anthropic",
 ]
 extras = {
     "test": test_deps,

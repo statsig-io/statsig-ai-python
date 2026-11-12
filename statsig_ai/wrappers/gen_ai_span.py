@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 import inspect
 import logging
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Iterator, List, Mapping
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Iterator, List, Mapping, Optional
 
 from opentelemetry import context as otel_context
 from opentelemetry import trace
@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 GetAttributes = Callable[[Any], Mapping[str, Any]]
 GetStreamAttributes = Callable[[List[Any]], Mapping[str, Any]]
+# Returns a provider's stream as a stream that ends the span once the caller has consumed it.
+WrapStream = Callable[[Any, SpanTelemetry, GetStreamAttributes], Any]
 
 
 def start_gen_ai_span(
@@ -77,13 +79,15 @@ def trace_gen_ai_call(
     call: Callable[[], Any],
     on_result: GetAttributes,
     on_stream: GetStreamAttributes,
+    wrap_stream: Optional[WrapStream] = None,
 ) -> Any:
     """Runs a provider call inside its span, and ends the span with the attributes of its result.
 
     A coroutine is returned as a coroutine that ends the span once it's awaited. A stream (an
     iterator or async iterator) is returned as a stream that ends the span once the caller has
-    consumed it. If the call raises, the span records the exception and an ERROR status, and the
-    exception is raised again.
+    consumed it: a generator, or what `wrap_stream` returns, for a provider whose stream object
+    has more to it than iteration. If the call raises, the span records the exception and an
+    ERROR status, and the exception is raised again.
     """
     try:
         with _activated(telemetry.span):
@@ -93,8 +97,8 @@ def trace_gen_ai_call(
         telemetry.end()
         raise
     if inspect.iscoroutine(result):
-        return _finish_after(telemetry, result, on_result, on_stream)
-    return _finish(telemetry, result, on_result, on_stream)
+        return _finish_after(telemetry, result, on_result, on_stream, wrap_stream)
+    return _finish(telemetry, result, on_result, on_stream, wrap_stream)
 
 
 async def _finish_after(
@@ -102,6 +106,7 @@ async def _finish_after(
     pending: Awaitable[Any],
     on_result: GetAttributes,
     on_stream: GetStreamAttributes,
+    wrap_stream: Optional[WrapStream],
 ) -> Any:
     try:
         with _activated(telemetry.span):
@@ -110,7 +115,7 @@ async def _finish_after(
         telemetry.fail(e)
         telemetry.end()
         raise
-    return _finish(telemetry, result, on_result, on_stream)
+    return _finish(telemetry, result, on_result, on_stream, wrap_stream)
 
 
 def _finish(
@@ -118,10 +123,14 @@ def _finish(
     result: Any,
     on_result: GetAttributes,
     on_stream: GetStreamAttributes,
+    wrap_stream: Optional[WrapStream],
 ) -> Any:
-    if hasattr(result, "__aiter__"):
-        return _trace_async_stream(result, telemetry, on_stream)
+    is_async_stream = hasattr(result, "__aiter__")
     # Checks for an iterator, not an iterable: pydantic responses are iterable over their fields.
+    if wrap_stream is not None and (is_async_stream or isinstance(result, Iterator)):
+        return wrap_stream(result, telemetry, on_stream)
+    if is_async_stream:
+        return _trace_async_stream(result, telemetry, on_stream)
     if isinstance(result, Iterator):
         return _trace_sync_stream(result, telemetry, on_stream)
     telemetry.record_time_to_first_token()
