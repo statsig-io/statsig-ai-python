@@ -1,8 +1,9 @@
 import copy
-import re
 from typing import Any, Dict, List, TypedDict
+
 from statsig_python_core import DynamicConfig
 
+from ._vendor import combustache
 from .otel.prompt_context import record_prompt_template_variables
 
 
@@ -91,37 +92,32 @@ class PromptVersion:
             "prompts", [{"role": "system", "content": ""}]
         )
         record_prompt_template_variables(self._id, params)
-        regex = re.compile(r"{{\s*([^}]+)\s*}}")
-
-        def replace_placeholders(content: str) -> str:
-            def replacer(match):
-                path = match.group(1).strip()
-                value = resolve_path(params, path)
-                return str(value) if value is not None else f"{{{{{path}}}}}"
-
-            return regex.sub(replacer, content)
 
         return [
-            PromptMessage(role=p["role"], content=replace_placeholders(p["content"]))
+            PromptMessage(role=p["role"], content=_render_mustache(p["content"], params))
             for p in prompts
         ]
 
 
-def resolve_path(obj: Any, path: str) -> Any:
-    """Safely resolves nested object paths, supporting array indices like `a.b[0].c`."""
-    parts = path.replace("[", ".").replace("]", "").split(".")
-    current = obj
-    for key in parts:
-        if current is None or key == "":
-            return None
-        if isinstance(current, dict):
-            current = current.get(key)
-        elif isinstance(current, list):
-            try:
-                idx = int(key)
-                current = current[idx]
-            except (ValueError, IndexError):
-                return None
-        else:
-            return None
-    return current
+def _render_mustache(template: str, params: PromptParams) -> str:
+    """
+    Renders a prompt template like the Node SDK's mustache.js call: values are
+    inserted as-is, without HTML escaping, and missing ones render as "".
+    """
+    return combustache.render(
+        template, params, stringify=_to_js_string, escape=lambda text: text
+    )
+
+
+def _to_js_string(value: Any) -> str:
+    """Converts a value to text the way mustache.js does, with JavaScript's String()."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    # JavaScript has one number type, so 1.0 prints as "1". From 1e21 it uses exponents.
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e21:
+        return str(int(value))
+    if isinstance(value, (list, tuple)):
+        return ",".join(_to_js_string(item) for item in value)
+    return str(value)
