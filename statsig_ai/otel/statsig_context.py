@@ -62,7 +62,7 @@ def get_statsig_span_attrs_from_context(
         custom_ids[STATSIG_ATTR_ACTIVITY_ID] = statsig_ctx.activity_id
 
     if custom_ids:
-        attrs[STATSIG_ATTR_CUSTOM_IDS] = json.dumps(custom_ids, separators=(",", ":"))
+        attrs[STATSIG_ATTR_CUSTOM_IDS] = json.dumps(custom_ids, separators=(",", ":"), ensure_ascii=False)
 
     return attrs if attrs else None
 

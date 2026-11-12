@@ -46,7 +46,7 @@ def get_user_span_attrs_from_context(
 
     attrs = {STATSIG_ATTR_USER_ID: user.user_id}
     if user.custom_ids:
-        attrs[STATSIG_ATTR_CUSTOM_IDS] = json.dumps(user.custom_ids, separators=(",", ":"))
+        attrs[STATSIG_ATTR_CUSTOM_IDS] = json.dumps(user.custom_ids, separators=(",", ":"), ensure_ascii=False)
     return attrs
 
 

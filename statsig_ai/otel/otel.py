@@ -1,6 +1,5 @@
-import os
 import logging
-from typing import Optional, Dict
+from typing import Optional
 from dataclasses import dataclass
 
 from opentelemetry import trace, context
@@ -12,6 +11,7 @@ from opentelemetry.sdk.resources import Resource
 from .conventions import ATTR_DEPLOYMENT_ENVIRONMENT_NAME
 from .exporter import StatsigOTLPTraceExporter, StatsigOTLPTraceExporterOptions
 from .processor import StatsigSpanProcessor
+from .resources import StatsigResourceAttributes, create_resource_attributes
 from .singleton import OtelSingleton
 
 
@@ -59,20 +59,19 @@ def initialize_tracing(
                 "You can skip this setup by passing skip_global_context_manager_setup=True."
             )
 
-    environment = options.environment or os.getenv("PYTHON_ENV")
+    resources = create_resource_attributes(
+        service_name=options.service_name,
+        version=options.version,
+        environment=options.environment,
+    )
     trace_components = _create_trace_components(
         exporter_options=options.exporter_options,
-        resources={
-            "service.name": options.service_name or os.getenv("OTEL_SERVICE_NAME"),
-            "service.version": options.version,
-            ATTR_DEPLOYMENT_ENVIRONMENT_NAME: environment,
-            "env": environment,
-        },
+        resources=resources,
     )
 
     tracer_provider = options.global_trace_provider or trace_components.provider
 
-    OtelSingleton.instantiate(tracer_provider)
+    OtelSingleton.instantiate(tracer_provider, resources)
 
     if options.enable_global_trace_provider_registration:
         trace.set_tracer_provider(tracer_provider)
@@ -82,7 +81,7 @@ def initialize_tracing(
 
 def _create_trace_components(
     exporter_options: StatsigOTLPTraceExporterOptions,
-    resources: Dict[str, Optional[str]],
+    resources: StatsigResourceAttributes,
 ) -> InitializeTracingResult:
     exporter = StatsigOTLPTraceExporter(
         options=exporter_options,
@@ -90,7 +89,18 @@ def _create_trace_components(
 
     processor = StatsigSpanProcessor(exporter)
 
-    resource = Resource.create({k: v for k, v in resources.items() if v is not None})
+    # Like the Node SDK, the resource has the raw service, version and environment
+    # values as well as the OpenTelemetry names for them.
+    attributes = {
+        "service": resources.service,
+        "version": resources.version,
+        "environment": resources.environment,
+        "service.name": resources.service,
+        "service.version": resources.version,
+        ATTR_DEPLOYMENT_ENVIRONMENT_NAME: resources.environment,
+        "env": resources.environment,
+    }
+    resource = Resource.create({k: v for k, v in attributes.items() if v is not None})
 
     provider = TracerProvider(
         resource=resource,

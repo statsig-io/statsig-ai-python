@@ -1,15 +1,28 @@
+from typing import Optional
+
 from opentelemetry import trace
 from opentelemetry.trace import TracerProvider
+
+from .resources import StatsigResourceAttributes
 
 
 class OtelSingleton:
     _instance = None
 
-    def __init__(self, tracer_provider: TracerProvider):
+    def __init__(
+        self,
+        tracer_provider: TracerProvider,
+        resources: Optional[StatsigResourceAttributes] = None,
+    ):
         self._tracer_provider = tracer_provider
+        self._resources = resources if resources is not None else StatsigResourceAttributes()
 
     @classmethod
-    def instantiate(cls, tracer_provider: TracerProvider):
+    def instantiate(
+        cls,
+        tracer_provider: TracerProvider,
+        resources: Optional[StatsigResourceAttributes] = None,
+    ):
         """
         Create or return an existing OtelSingleton instance.
         """
@@ -19,7 +32,7 @@ class OtelSingleton:
                 "Returning the existing instance."
             )
             return cls._instance
-        cls._instance = cls(tracer_provider)
+        cls._instance = cls(tracer_provider, resources)
         return cls._instance
 
     @classmethod
@@ -35,6 +48,10 @@ class OtelSingleton:
 
     def get_tracer_provider(self) -> TracerProvider:
         return self._tracer_provider
+
+    def get_resources(self) -> StatsigResourceAttributes:
+        """The service, version and environment initialize_tracing() put on the tracer resource."""
+        return self._resources
 
     @classmethod
     def get_tracer_provider_static(cls) -> TracerProvider:

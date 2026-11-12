@@ -44,11 +44,17 @@ class FakeStatsig:
     def __init__(self) -> None:
         self.events: List[Dict[str, Any]] = []
 
-    def log_event(self, _user, event_name, value, metadata) -> None:
-        self.events.append({"event_name": event_name, "value": value, "metadata": metadata})
+    def log_event(self, user, event_name, value, metadata) -> None:
+        self.events.append(
+            {"user": user, "event_name": event_name, "value": value, "metadata": metadata}
+        )
 
     def by_value(self, value: str) -> List[Dict[str, str]]:
         return [e["metadata"] for e in self.events if e["value"] == value]
+
+    def user_custom_ids(self, value: str) -> Optional[Dict[str, str]]:
+        [user] = [e["user"] for e in self.events if e["value"] == value]
+        return user.custom_ids
 
 
 class Tracing:
@@ -254,14 +260,12 @@ def test_tags_workflow_spans_with_the_active_version_and_the_variables_rendered_
     tool = tracing.attrs("execute_tool")
     assert workflow[STATSIG_ATTR_LLM_PROMPT_NAME] == "support_agent"
     assert workflow[STATSIG_ATTR_LLM_PROMPT_VERSION_ID] == "version-3"
-    assert workflow[STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES] == json.dumps({"input": "Hi"})
+    assert workflow[STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES] == '{"input":"Hi"}'
     assert tool[STATSIG_ATTR_LLM_PROMPT_VERSION_ID] == "version-3"
     assert STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES not in tool
 
     [workflow_event] = tracing.statsig.by_value("invoke_workflow")
-    assert workflow_event[STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES] == json.dumps(
-        {"input": "Hi"}
-    )
+    assert workflow_event[STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES] == '{"input":"Hi"}'
     [tool_event] = tracing.statsig.by_value("execute_tool")
     assert STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES not in tool_event
 
@@ -283,6 +287,11 @@ def test_sets_statsig_context_with_user_and_activity_id(tracing):
         "sessionID": "session-456",
         STATSIG_ATTR_ACTIVITY_ID: "activity-789",
     }
+
+    # The event user takes the activity ID passed to wrap(), not the user's custom IDs.
+    [event] = tracing.statsig.events
+    assert event["user"].user_id == "statsig-ai-openai-wrapper"
+    assert event["user"].custom_ids == {STATSIG_ATTR_ACTIVITY_ID: "activity-789"}
 
 
 def test_sets_statsig_context_with_only_activity_id(tracing):
@@ -306,6 +315,7 @@ def test_sets_statsig_context_with_only_user(tracing):
     assert attrs[STATSIG_ATTR_USER_ID] == "user-only-456"
     assert STATSIG_ATTR_ACTIVITY_ID not in attrs
     assert STATSIG_ATTR_CUSTOM_IDS not in attrs
+    assert not tracing.statsig.user_custom_ids("execute_tool")
 
 
 @pytest.mark.asyncio
@@ -332,6 +342,7 @@ async def test_propagates_statsig_context_in_async_wrapped_functions(tracing):
         attrs = tracing.attrs(name)
         assert attrs[STATSIG_ATTR_USER_ID] == "async-user-789"
         assert json.loads(attrs[STATSIG_ATTR_CUSTOM_IDS]) == expected_custom_ids
+        assert tracing.statsig.user_custom_ids(name) == expected_custom_ids
     assert tracing.span("invoke_workflow").status.status_code == StatusCode.OK
 
 
@@ -408,10 +419,14 @@ def test_sync_errors_are_recorded_and_reraised(tracing):
     [exception] = span.events
     assert exception.name == "exception"
     assert (exception.attributes or {})["exception.type"] == "RuntimeError"
+    # Like the Node SDK, the type and message are only in the event metadata.
+    assert "exception.type" not in (span.attributes or {})
+    assert "exception.message" not in (span.attributes or {})
 
     [event] = tracing.statsig.events
     assert event["metadata"]["span.status_code"] == "ERROR"
     assert event["metadata"]["exception.type"] == "RuntimeError"
+    assert event["metadata"]["exception.message"] == "boom"
 
 
 def test_start_workflow_records_exceptions_and_lets_them_propagate(tracing):
@@ -438,6 +453,7 @@ def test_start_workflow_sets_the_statsig_context(tracing):
         attrs = tracing.attrs(name)
         assert attrs[STATSIG_ATTR_USER_ID] == "user-1"
         assert json.loads(attrs[STATSIG_ATTR_CUSTOM_IDS]) == expected_custom_ids
+        assert tracing.statsig.user_custom_ids(name) == {STATSIG_ATTR_ACTIVITY_ID: "activity-1"}
 
 
 @pytest.mark.asyncio

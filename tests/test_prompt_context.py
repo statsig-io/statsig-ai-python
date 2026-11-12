@@ -294,8 +294,10 @@ def test_template_variables_are_recorded_when_input_capture_is_on(tracing, promp
     [span] = tracing.spans()
     [event] = tracing.statsig.events
     variables = span[STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES]
-    assert json.loads(variables) == {"input": "hello"}
+    assert variables == '{"input":"hello"}'
     assert event[STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES] == variables
+    assert span[f"{STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES}_len"] == len(variables)
+    assert event[f"{STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES}_len"] == str(len(variables))
 
 
 def test_long_template_variables_are_capped_like_other_json_attributes(tracing, prompt):
@@ -304,12 +306,13 @@ def test_long_template_variables_are_capped_like_other_json_attributes(tracing, 
 
     [span] = tracing.spans()
     [event] = tracing.statsig.events
-    full_len = len(json.dumps({"input": "x" * 50_000}))
+    full_len = len('{"input":"' + "x" * 50_000 + '"}')
     variables = span[STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES]
     assert variables.endswith("…(truncated)")
     assert len(variables) == span_telemetry.MAX_JSON_CHARS + len("…(truncated)")
     assert span[f"{STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES}_len"] == full_len
     assert event[STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES] == variables
+    assert event[f"{STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES}_len"] == str(full_len)
 
 
 @pytest.mark.parametrize(

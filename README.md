@@ -166,6 +166,14 @@ with statsig_environment("staging_canary"):
     handle_request(request)
 ```
 
+`service_name` (defaults to `OTEL_SERVICE_NAME`, then `SERVICE_NAME`) and `version` are recorded on the resource as `service.name` and `service.version`. The resource also has the three values as `service`, `version` and `environment`, as in the Node SDK.
+
+### The `statsig::gen_ai` event
+
+Each wrapped model call and `wrap` span also logs a `statsig::gen_ai` event. Its value is the span name, and its metadata has the span's attributes plus `span.name`, `span.trace_id`, `span.span_id` and `duration` (whole milliseconds). Values are written as the Node SDK writes them, so events from both SDKs match. A list, tuple or dict attribute is recorded as compact JSON with non-ASCII text as is, as JavaScript's `JSON.stringify` writes it. It's capped at 40,000 UTF-16 code units (a JavaScript string's length), and its full length is in `<key>_len`. Booleans are written as `true` and `false`, and numbers as JavaScript prints them, for example `1` for `1.0`. An exception's type and message are recorded as `exception.type` and `exception.message` in the metadata, and as OpenTelemetry's `exception` event on the span.
+
+The event user's ID is always `statsig-ai-openai-wrapper`. Its custom IDs are the `service`, `version` and `environment` passed to `initialize_tracing` (or, without it, read from the environment variables above), and `statsig.activity_id` from the active `statsig_context`, each only when set. The context's user is recorded in the span attributes, not on the event user.
+
 ### Tracing evals
 
 When tracing is initialized with `initialize_tracing()`, `Eval()` and `EvalAsync()` give each record its own trace, even when they're called inside another span. The root span is a `workflow` span marked `statsig.span.llm_root=1` and `statsig.environment=eval`, with `statsig.eval.name`, `statsig.eval.run_name` and `statsig.eval.record_index`. Model calls the task makes through `wrap_openai()`, from an `async def` task or a plain function, are its children, and each scorer runs in its own child span with `statsig.eval.scorer_name`. If the task raises, the record span records the exception. Each result's `trace_id` and `span_id` are returned and sent to Statsig with the scores, and `Eval()` flushes the spans before it sends the results.

@@ -129,7 +129,9 @@ class _WrappedCall:
         else:
             self._telemetry.fail(error)
         self._telemetry.set_attributes(self._get_prompt_attrs(self.ctx))
-        self._telemetry.end()
+        # As in the Node SDK, the event user reads the activity ID from the span's own
+        # context, which holds the user and activity_id passed to wrap().
+        self._telemetry.end(self.ctx)
 
     async def end_after(self, awaitable: Awaitable[R]) -> R:
         try:

@@ -6,6 +6,7 @@ from .otel import (
 from .exporter import StatsigOTLPTraceExporter, StatsigOTLPTraceExporterOptions
 from .processor import StatsigSpanProcessor
 from .singleton import OtelSingleton, NoopOtelSingleton
+from .resources import StatsigResourceAttributes
 from .statsig_context import (
     StatsigContext,
     statsig_context,
@@ -39,6 +40,7 @@ __all__ = [
     "StatsigSpanProcessor",
     "OtelSingleton",
     "NoopOtelSingleton",
+    "StatsigResourceAttributes",
     # Statsig Context
     "StatsigContext",
     "statsig_context",

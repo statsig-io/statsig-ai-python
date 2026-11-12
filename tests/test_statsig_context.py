@@ -26,3 +26,12 @@ def test_activity_id_alone_sets_custom_ids_but_no_user_id():
         assert get_statsig_span_attrs_from_context() == {
             STATSIG_ATTR_CUSTOM_IDS: '{"statsig.activity_id":"activity-1"}',
         }
+
+
+def test_non_ascii_custom_ids_are_written_as_is():
+    user = StatsigUser("user-1", custom_ids={"team": "café"})
+    with statsig_context(StatsigContext(user=user)):
+        attrs = get_statsig_span_attrs_from_context()
+        assert attrs is not None
+        # Like Node's JSON.stringify, non-ASCII text isn't escaped.
+        assert attrs[STATSIG_ATTR_CUSTOM_IDS] == '{"team":"café"}'

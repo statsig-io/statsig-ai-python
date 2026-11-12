@@ -103,3 +103,11 @@ def test_processor_omits_custom_ids_when_empty(tracing):
     attrs = finished_spans()["no-custom-ids"].attributes or {}
     assert attrs[STATSIG_ATTR_USER_ID] == "no-custom-ids"
     assert STATSIG_ATTR_CUSTOM_IDS not in attrs
+
+
+def test_non_ascii_custom_ids_are_written_as_is():
+    ctx = set_user_to_otel_context(otel_context.get_current(), StatsigUser("u", custom_ids={"team": "café"}))
+    attrs = get_user_span_attrs_from_context(ctx)
+    assert attrs is not None
+    # Like Node's JSON.stringify, non-ASCII text isn't escaped.
+    assert attrs[STATSIG_ATTR_CUSTOM_IDS] == '{"team":"café"}'

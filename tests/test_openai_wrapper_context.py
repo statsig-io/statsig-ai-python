@@ -43,9 +43,11 @@ class StartAttributesRecorder(SpanProcessor):
 class FakeStatsig:
     def __init__(self) -> None:
         self.events: List[Dict[str, str]] = []
+        self.users: List[StatsigUser] = []
 
-    def log_event(self, _user, _event_name, _value, metadata) -> None:
+    def log_event(self, user, _event_name, _value, metadata) -> None:
         self.events.append(metadata)
+        self.users.append(user)
 
 
 @pytest.fixture
@@ -100,6 +102,11 @@ def test_model_span_and_event_get_context_and_environment(traced_openai):
     for key in [STATSIG_ATTR_SPAN_TYPE, *CONTEXT_KEYS]:
         assert metadata[key] == attrs[key]
 
+    # Like the Node SDK, the event user keeps its placeholder ID and takes only the activity ID.
+    [event_user] = statsig.users
+    assert event_user.user_id == "statsig-ai-openai-wrapper"
+    assert event_user.custom_ids == {STATSIG_ATTR_ACTIVITY_ID: "activity-1"}
+
 
 def test_model_span_and_event_skip_context_attributes_outside_any_scope(traced_openai):
     client, exporter, _, statsig = traced_openai
@@ -114,6 +121,8 @@ def test_model_span_and_event_skip_context_attributes_outside_any_scope(traced_o
     for key in CONTEXT_KEYS:
         assert key not in attrs
         assert key not in metadata
+    [event_user] = statsig.users
+    assert not event_user.custom_ids
 
 
 def test_model_span_is_the_llm_root_unless_the_context_has_a_root(traced_openai):
