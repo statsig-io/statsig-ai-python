@@ -1,7 +1,29 @@
+"""Traces OpenAI client calls as GenAI spans.
+
+Ported from the Node SDK's openai-impl.ts and gen-ai-span.ts.
+"""
+
+import functools
 import inspect
 import logging
-from typing import Any, Dict, Optional
+from contextlib import contextmanager
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Dict,
+    Generator,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+)
+
 from opentelemetry import context as otel_context
+from opentelemetry import trace
+from opentelemetry.context import Context
 from opentelemetry.trace import SpanKind, StatusCode, Tracer
 
 from statsig_ai.otel.conventions import (
@@ -15,13 +37,9 @@ from statsig_ai.otel.environment_context import get_environment_span_attrs_from_
 from statsig_ai.otel.prompt_context import get_prompt_span_attrs_from_context
 from statsig_ai.otel.statsig_context import get_statsig_span_attrs_from_context
 
-from .genai_attribute_helper import (
-    extract_genai_attributes,
-    extract_opt_in_attributes,
-    extract_oai_usage_attributes,
-)
+from .genai_attribute_helper import extract_base_attributes, extract_response_attributes
 from ..otel.singleton import OtelSingleton
-from .configs import WrapOpenAIOptions
+from .configs import GenAICaptureOptions, WrapOpenAIOptions
 from .span_telemetry import SpanTelemetry
 
 logger = logging.getLogger(__name__)
@@ -43,20 +61,19 @@ OTEL_OP_NAME_MAP = {
 
 
 class BaseWrapper:
-    def __init__(self, client: Any, operation_name: str, options: WrapOpenAIOptions):
+    def __init__(self, client: Any, options: WrapOpenAIOptions):
         self._client = client
-        self._operation_name = operation_name
+        self._wrap_options = options
         self._options = options.gen_ai_capture_options
 
     def __getattr__(self, name):
         return getattr(self._client, name)
 
-    def _start_span_with_telemetry(self, model: str, kwargs: dict) -> SpanTelemetry:
+    def _start_span(self, operation_name: str, kwargs: Mapping[str, Any]) -> SpanTelemetry:
+        model = kwargs.get("model")
         # Use OTEL semantic name if available, otherwise strip "openai." prefix
-        otel_name = OTEL_OP_NAME_MAP.get(
-            self._operation_name, self._operation_name.replace("openai.", "")
-        )
-        span_name = f"{otel_name} {model}"
+        otel_name = OTEL_OP_NAME_MAP.get(operation_name, operation_name.replace("openai.", ""))
+        span_name = f"{otel_name} {model if model is not None else 'unknown'}"
 
         # Like the Node SDK's startGenAISpan, the span starts with the active prompt version,
         # statsig_context and statsig_environment attributes, and the statsig::gen_ai event
@@ -83,166 +100,137 @@ class BaseWrapper:
         statsig_attrs.update(get_statsig_span_attrs_from_context(ctx) or {})
         statsig_attrs.update(get_environment_span_attrs_from_context(ctx) or {})
 
-        # Template variables are a dict. SpanTelemetry writes them as capped JSON below, so
-        # the span starts with the plain values only.
-        start_attrs = {k: v for k, v in statsig_attrs.items() if not isinstance(v, (dict, list))}
+        # As in the Node SDK, the wrapper's own attributes win over custom attributes.
+        attrs: Dict[str, Any] = {
+            **self._wrap_options.custom_attributes,
+            **extract_base_attributes(operation_name, otel_name, kwargs, self._options),
+            **statsig_attrs,
+        }
+
+        # Messages and template variables are lists and dicts. SpanTelemetry writes them as
+        # capped JSON below, so the span starts with the plain values only.
+        start_attrs = {
+            k: v for k, v in attrs.items() if v is not None and not isinstance(v, (dict, list))
+        }
         span = _get_tracer().start_span(
             span_name, context=ctx, kind=SpanKind.CLIENT, attributes=start_attrs
         )
-        telemetry = SpanTelemetry(span, span_name, provider_name="openai")
-        telemetry.set_attributes(statsig_attrs)
-
-        base_attrs = extract_genai_attributes(
-            "openai", self._operation_name, model, kwargs, None, otel_operation_name=otel_name
+        telemetry = SpanTelemetry(
+            span,
+            span_name,
+            provider_name="openai",
+            max_json_chars=self._wrap_options.max_json_chars,
         )
-        telemetry.set_attributes(base_attrs)
-
+        telemetry.set_attributes(attrs)
         return telemetry
 
-    def _get_stream_parser(self):
-        if "chat.completions" in self._operation_name:
-            return _parse_chat_completion_chunks
-        if "responses" in self._operation_name:
-            return _parse_responses_api_chunks
-        return _parse_generic_chunks
-
-    def _wrap_call(self, fn_name: str):
+    def _wrap_call(self, fn_name: str, operation_name: str) -> Callable[..., Any]:
         original_fn = getattr(self._client, fn_name)
-        stream_parser = self._get_stream_parser()
 
         def wrapper(*args, **kwargs):
-            model = kwargs.get("model", "unknown")
-            telemetry = self._start_span_with_telemetry(model, kwargs)
-            should_end_telemetry = True
-
+            telemetry = self._start_span(operation_name, kwargs)
+            # Like the Node SDK's traceGenAICall, the call runs with its span active, so spans
+            # and logs made during the call, such as HTTP client spans, are its children.
+            span_ctx = trace.set_span_in_context(telemetry.span)
             try:
-                result = original_fn(*args, **kwargs)
-
-                # Async method: delegate to async handler to await and check if streaming
-                if inspect.iscoroutine(result):
-                    should_end_telemetry = False
-                    return self._handle_async_result(
-                        result, telemetry, model, kwargs, stream_parser
-                    )
-
-                # Sync streaming: wrap iterator to collect chunks for telemetry
-                if kwargs.get("stream") and hasattr(result, "__iter__"):
-                    should_end_telemetry = False
-                    return self._wrap_sync_stream(result, telemetry, model, kwargs, stream_parser)
-
-                # Sync non-streaming: extract telemetry immediately from complete response
-                self._record_attributes(telemetry, model, kwargs, result)
-                telemetry.record_time_to_first_token()
-                telemetry.set_status({"code": StatusCode.OK})
-                return result
-
-            except Exception as e:
-                telemetry.fail(e)
+                with _activated(span_ctx):
+                    result = original_fn(*args, **kwargs)
+            except BaseException as e:
+                _end_failed(telemetry, e)
                 raise
-            finally:
-                if should_end_telemetry:
-                    telemetry.end()
+
+            if inspect.isawaitable(result):
+                return self._finish_async_call(result, telemetry, span_ctx, kwargs)
+            if kwargs.get("stream") and _is_sync_stream(result):
+                telemetry.set_attributes({"gen_ai.request.stream": True})
+                return _TracedStream(result, telemetry, self._options)
+            _end_with_response(telemetry, result, self._options)
+            return result
 
         return wrapper
 
-    async def _handle_async_result(
-        self, coro, telemetry: SpanTelemetry, model: str, kwargs: dict, parser
-    ):
-        should_end_telemetry = True
-
+    async def _finish_async_call(
+        self,
+        awaitable: Awaitable[Any],
+        telemetry: SpanTelemetry,
+        span_ctx: Context,
+        kwargs: Mapping[str, Any],
+    ) -> Any:
         try:
-            # Await the coroutine to get the actual result
-            result = await coro
-
-            # Async streaming: wrap async iterator to collect chunks for telemetry
-            if kwargs.get("stream") and hasattr(result, "__aiter__"):
-                should_end_telemetry = False
-                return self._wrap_async_stream(result, telemetry, model, kwargs, parser)
-
-            # Async non-streaming: extract telemetry immediately from complete response
-            self._record_attributes(telemetry, model, kwargs, result)
-            telemetry.set_status({"code": StatusCode.OK})
-            return result
-
-        except Exception as e:
-            telemetry.fail(e)
+            # The request is sent when the coroutine is awaited, so the span is active again.
+            with _activated(span_ctx):
+                result = await awaitable
+        except BaseException as e:
+            _end_failed(telemetry, e)
             raise
-        finally:
-            if should_end_telemetry:
-                telemetry.end()
 
-    def _wrap_async_stream(
-        self, stream, telemetry: SpanTelemetry, model: str, kwargs: dict, parser
-    ):
-        async def gen():
-            all_chunks = []
-            first = True
-            try:
-                async for chunk in stream:
-                    if first:
-                        telemetry.record_time_to_first_token()
-                        first = False
-                    all_chunks.append(chunk)
-                    yield chunk
+        if kwargs.get("stream") and hasattr(result, "__aiter__"):
+            telemetry.set_attributes({"gen_ai.request.stream": True})
+            return _AsyncTracedStream(result, telemetry, self._options)
+        _end_with_response(telemetry, result, self._options)
+        return result
 
-                attrs = parser(all_chunks, self._operation_name, model, kwargs)
-                telemetry.set_attributes(attrs)
-                telemetry.set_status({"code": StatusCode.OK})
-            except Exception as e:
-                telemetry.fail(e)
-                raise
-            finally:
-                telemetry.end()
+    def _wrap_stream_manager(self, fn_name: str, operation_name: str) -> Callable[..., Any]:
+        """Wraps a method that returns a stream manager, such as `responses.stream()`."""
+        original_fn = getattr(self._client, fn_name)
 
-        return gen()
-
-    def _wrap_sync_stream(self, stream, telemetry: SpanTelemetry, model: str, kwargs: dict, parser):
-        def gen():
-            all_chunks = []
-            first = True
-            try:
-                for chunk in stream:
-                    if first:
-                        telemetry.record_time_to_first_token()
-                        first = False
-                    all_chunks.append(chunk)
-                    yield chunk
-
-                attrs = parser(all_chunks, self._operation_name, model, kwargs)
-                telemetry.set_attributes(attrs)
-                telemetry.set_status({"code": StatusCode.OK})
-            except Exception as e:
-                telemetry.fail(e)
-                raise
-            finally:
-                telemetry.end()
-
-        return gen()
-
-    def _record_attributes(self, telemetry: SpanTelemetry, model: str, kwargs: dict, result: Any):
-        result_dict = _convert_result_to_dict(result)
-        if result_dict is None:
-            logging.warning(
-                "[Statsig] Failed to convert result to dict. Type: %s, Operation: %s",
-                type(result),
-                self._operation_name,
+        def wrapper(*args, **kwargs):
+            manager = original_fn(*args, **kwargs)
+            start_span = functools.partial(self._start_span, operation_name, kwargs)
+            if hasattr(manager, "__aenter__"):
+                return _AsyncTracedStreamManager(manager, start_span, self._options)
+            if hasattr(manager, "__enter__"):
+                return _TracedStreamManager(manager, start_span, self._options)
+            logger.warning(
+                "[Statsig] %s did not return a stream manager. Not tracing it.", operation_name
             )
-            return
+            return manager
 
-        otel_name = OTEL_OP_NAME_MAP.get(
-            self._operation_name, self._operation_name.replace("openai.", "")
-        )
-        attrs = extract_genai_attributes(
-            "openai",
-            self._operation_name,
-            model,
-            kwargs,
-            result_dict,
-            otel_operation_name=otel_name,
-        )
-        opt_in = extract_opt_in_attributes(self._options, kwargs, result_dict)
-        telemetry.set_attributes(attrs)
-        telemetry.set_attributes(opt_in)
+        return wrapper
+
+
+@contextmanager
+def _activated(ctx: Context) -> Iterator[None]:
+    token = otel_context.attach(ctx)
+    try:
+        yield
+    finally:
+        otel_context.detach(token)
+
+
+def _end_failed(telemetry: SpanTelemetry, error: BaseException) -> None:
+    telemetry.fail(error)
+    telemetry.end()
+
+
+def _end_with_response(telemetry: SpanTelemetry, result: Any, options: GenAICaptureOptions) -> None:
+    telemetry.record_time_to_first_token()
+    telemetry.set_status({"code": StatusCode.OK})
+    _set_attributes_safely(telemetry, lambda: _response_attributes(result, options))
+    telemetry.end()
+
+
+def _response_attributes(result: Any, options: GenAICaptureOptions) -> Dict[str, Any]:
+    response = _convert_result_to_dict(result)
+    if response is None:
+        logger.warning("[Statsig] Failed to convert result to dict. Type: %s", type(result))
+        return {}
+    return extract_response_attributes(response, options)
+
+
+def _set_attributes_safely(
+    telemetry: SpanTelemetry, get_attributes: Callable[[], Dict[str, Any]]
+) -> None:
+    try:
+        telemetry.set_attributes(get_attributes())
+    except Exception as e:
+        logger.warning("[Statsig] Failed to record Gen AI response attributes: %s", e)
+
+
+def _is_sync_stream(result: Any) -> bool:
+    if isinstance(result, (Mapping, str, bytes)) or hasattr(result, "model_dump"):
+        return False
+    return hasattr(result, "__iter__")
 
 
 def _convert_result_to_dict(result) -> Optional[dict]:
@@ -270,184 +258,382 @@ def _convert_result_to_dict(result) -> Optional[dict]:
     return None
 
 
-def _parse_chat_completion_chunks(items, _operation_name: str, _model: str, _kwargs: dict):
-    attrs: dict[str, Any] = {
-        "gen_ai.request.stream": True,
-    }
+def _get_field(item: Any, name: str) -> Any:
+    if isinstance(item, Mapping):
+        return item.get(name)
+    return getattr(item, name, None)
 
-    choice_deltas: dict[int, list[str]] = {}
-    choice_roles: dict[int, str] = {}
-    choice_finish_reasons: dict[int, str] = {}
 
-    response_id = None
-    response_model = None
-    usage_data = None
+class _StreamedChoice:
+    """One choice of a Chat Completions or completions stream, rebuilt from its deltas."""
 
-    for item in items:
-        parsed_item = _convert_result_to_dict(item) or {}
+    def __init__(self, index: Any) -> None:
+        self.index = index
+        self.role: Optional[str] = None
+        self.content: Optional[List[str]] = None
+        self.refusal: Optional[List[str]] = None
+        self.text: Optional[List[str]] = None
+        self.tool_calls: Dict[Any, Dict[str, Any]] = {}
+        self.finish_reason: Any = None
 
-        if response_id is None:
-            response_id = parsed_item.get("id")
-            response_model = parsed_item.get("model")
+    def add(self, choice: Mapping[str, Any]) -> None:
+        delta = choice.get("delta")
+        if isinstance(delta, Mapping):
+            self.role = delta.get("role") or self.role
+            self.content = _append(self.content, delta.get("content"))
+            self.refusal = _append(self.refusal, delta.get("refusal"))
+            for tool_call in delta.get("tool_calls") or ():
+                if isinstance(tool_call, Mapping):
+                    self._add_tool_call(tool_call)
+        # Completions (not chat) chunks stream text instead of a delta.
+        self.text = _append(self.text, choice.get("text"))
+        if choice.get("finish_reason"):
+            self.finish_reason = choice["finish_reason"]
 
-        if "usage" in parsed_item:
-            usage_data = parsed_item["usage"]
-
-        choices = parsed_item.get("choices", [])
-        for choice in choices:
-            index = choice.get("index", 0)
-            delta = choice.get("delta", {})
-            finish_reason = choice.get("finish_reason")
-
-            if "role" in delta and index not in choice_roles:
-                choice_roles[index] = delta["role"]
-
-            if "content" in delta and delta["content"]:
-                if index not in choice_deltas:
-                    choice_deltas[index] = []
-                choice_deltas[index].append(delta["content"])
-
-            if finish_reason:
-                choice_finish_reasons[index] = finish_reason
-
-    if response_id:
-        attrs["gen_ai.response.id"] = response_id
-    if response_model:
-        attrs["gen_ai.response.model"] = response_model
-
-    if usage_data:
-        attrs.update(extract_oai_usage_attributes(usage_data))
-
-    result_choices = []
-    for index in sorted(choice_deltas):
-        content = "".join(choice_deltas[index])
-        role = choice_roles.get(index, "assistant")
-        finish_reason = choice_finish_reasons.get(index, "stop")
-
-        result_choices.append(
-            {
-                "index": index,
-                "message": {
-                    "role": role,
-                    "content": content,
-                },
-                "finish_reason": finish_reason,
-            }
+    def _add_tool_call(self, delta: Mapping[str, Any]) -> None:
+        call = self.tool_calls.setdefault(
+            delta.get("index") or 0, {"id": None, "name": None, "arguments": []}
         )
+        function = delta.get("function")
+        function = function if isinstance(function, Mapping) else {}
+        if call["id"] is None:
+            call["id"] = delta.get("id")
+        if call["name"] is None:
+            call["name"] = function.get("name")
+        if isinstance(function.get("arguments"), str):
+            call["arguments"].append(function["arguments"])
 
-    if choice_finish_reasons:
-        attrs["gen_ai.response.finish_reasons"] = list(set(choice_finish_reasons.values()))
-
-    return attrs
-
-
-def _parse_responses_api_chunks(items, _operation_name: str, _model: str, _kwargs: dict):
-    attrs: dict[str, Any] = {
-        "gen_ai.request.stream": True,
-    }
-
-    delta_aggregator: dict[tuple[int, int], list[str]] = {}
-    message_metadata: dict[int, dict[str, Any]] = {}
-
-    first_response_data = None
-    final_response = None
-
-    for item in items:
-        parsed_item = _convert_result_to_dict(item) or {}
-        event_type = parsed_item.get("type")
-
-        if first_response_data is None and event_type == "response.created":
-            first_response_data = parsed_item.get("response", {})
-
-        if event_type == "response.output_text.delta":
-            output_index = parsed_item.get("output_index", 0)
-            content_index = parsed_item.get("content_index", 0)
-            delta = parsed_item.get("delta", "")
-
-            key = (output_index, content_index)
-            if key not in delta_aggregator:
-                delta_aggregator[key] = []
-            delta_aggregator[key].append(delta)
-
-        elif event_type == "response.output_item.added":
-            output_index = parsed_item.get("output_index", 0)
-            item_data = parsed_item.get("item", {})
-            message_metadata[output_index] = {
-                "role": item_data.get("role", "assistant"),
-                "id": item_data.get("id"),
-            }
-
-        elif event_type == "response.completed":
-            final_response = parsed_item.get("response", {})
-
-    if final_response:
-        if response_id := final_response.get("id"):
-            attrs["gen_ai.response.id"] = response_id
-        if response_model := final_response.get("model"):
-            attrs["gen_ai.response.model"] = response_model
-
-        usage = final_response.get("usage", {})
-        attrs.update(extract_oai_usage_attributes(usage))
-
-        if status := final_response.get("status"):
-            attrs["gen_ai.response.finish_reasons"] = [status]
-
-    choices = []
-    output_indices = sorted(set(idx for idx, _ in delta_aggregator))
-
-    for output_idx in output_indices:
-        content_parts = []
-        content_indices = sorted(
-            set(c_idx for o_idx, c_idx in delta_aggregator if o_idx == output_idx)
-        )
-
-        for content_idx in content_indices:
-            key = (output_idx, content_idx)
-            text = "".join(delta_aggregator[key])
-            if text:
-                content_parts.append(text)
-
-        metadata = message_metadata.get(output_idx, {})
-
-        choice = {
-            "index": output_idx,
-            "message": {
-                "role": metadata.get("role", "assistant"),
-                "content": "".join(content_parts),
-            },
-            "finish_reason": "completed" if final_response else "incomplete",
+    def to_choice(self) -> Dict[str, Any]:
+        message: Dict[str, Any] = {"role": self.role or "assistant"}
+        if self.content is not None:
+            message["content"] = "".join(self.content)
+        if self.refusal is not None:
+            message["refusal"] = "".join(self.refusal)
+        if self.tool_calls:
+            message["tool_calls"] = [
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {"name": call["name"], "arguments": "".join(call["arguments"])},
+                }
+                for _, call in sorted(self.tool_calls.items())
+            ]
+        choice: Dict[str, Any] = {
+            "index": self.index,
+            "message": message,
+            "finish_reason": self.finish_reason,
         }
-        choices.append(choice)
-
-    if choices:
-        attrs["choices"] = choices
-
-    return attrs
+        if self.text is not None:
+            choice["text"] = "".join(self.text)
+        return choice
 
 
-def _parse_generic_chunks(items, operation_name: str, model: str, kwargs: dict):
-    last_chunk = None
-    for item in items:
-        chunk_dict = _convert_result_to_dict(item)
-        if chunk_dict:
-            last_chunk = chunk_dict
+def _append(parts: Optional[List[str]], delta: Any) -> Optional[List[str]]:
+    if not isinstance(delta, str):
+        return parts
+    if parts is None:
+        return [delta]
+    parts.append(delta)
+    return parts
 
-    if last_chunk:
-        otel_name = OTEL_OP_NAME_MAP.get(operation_name, operation_name.replace("openai.", ""))
-        attrs = extract_genai_attributes(
-            "openai", operation_name, model, kwargs, last_chunk, otel_operation_name=otel_name
-        )
-        attrs["gen_ai.request.stream"] = True
-        return attrs
 
-    return {
-        "gen_ai.request.stream": True,
-    }
+class _StreamAggregator:
+    """Rebuilds the response a stream amounts to.
+
+    Chat Completions and completions responses are rebuilt from their chunks' deltas. A Responses
+    API stream's lifecycle events (created, in progress, completed...) carry the response so far,
+    so the last one is the response. Its other events are deltas of it, so they're skipped.
+    """
+
+    def __init__(self) -> None:
+        self._response: Dict[str, Any] = {}
+        self._choices: Dict[Any, _StreamedChoice] = {}
+        self._lifecycle_response: Any = None
+        self._failed = False
+
+    def add(self, item: Any) -> None:
+        if self._failed:
+            return
+        try:
+            self._add(item)
+        except Exception as e:
+            self._failed = True
+            logger.warning("[Statsig] Failed to read a streamed OpenAI chunk: %s", e)
+
+    def _add(self, item: Any) -> None:
+        lifecycle_response = _get_field(item, "response")
+        if lifecycle_response is not None:
+            self._lifecycle_response = lifecycle_response
+            return
+        event_type = _get_field(item, "type")
+        if isinstance(event_type, str) and event_type.startswith("response."):
+            return
+
+        chunk = _convert_result_to_dict(item) or {}
+        for key in ("id", "model", "service_tier", "system_fingerprint"):
+            if self._response.get(key) is None and chunk.get(key) is not None:
+                self._response[key] = chunk[key]
+        if chunk.get("usage"):
+            self._response["usage"] = chunk["usage"]
+        for choice in chunk.get("choices") or ():
+            if isinstance(choice, Mapping):
+                index = choice.get("index") or 0
+                self._choices.setdefault(index, _StreamedChoice(index)).add(choice)
+
+    def response(self) -> Optional[Mapping[str, Any]]:
+        if self._failed:
+            return None
+        if self._lifecycle_response is not None:
+            return _convert_result_to_dict(self._lifecycle_response)
+        response = dict(self._response)
+        if self._choices:
+            response["choices"] = [
+                choice.to_choice() for _, choice in sorted(self._choices.items())
+            ]
+        return response
+
+
+def _stream_attributes(stream: _StreamAggregator, options: GenAICaptureOptions) -> Dict[str, Any]:
+    response = stream.response()
+    return extract_response_attributes(response, options) if response is not None else {}
+
+
+def _trace_items(
+    source: Iterator[Any], telemetry: SpanTelemetry, options: GenAICaptureOptions
+) -> Generator[Any, None, None]:
+    """Yields a stream's items, and ends the span once the stream ends or is closed.
+
+    Like the Node SDK's TelemetryStream, the response is recorded when the stream has been read
+    to the end. A stream closed early ends the span without it.
+    """
+    stream = _StreamAggregator()
+    first = True
+    try:
+        for item in source:
+            if first:
+                telemetry.record_time_to_first_token()
+                first = False
+            stream.add(item)
+            yield item
+        _set_attributes_safely(telemetry, lambda: _stream_attributes(stream, options))
+        telemetry.set_status({"code": StatusCode.OK})
+    except BaseException as e:
+        if not isinstance(e, GeneratorExit):
+            telemetry.fail(e)
+        raise
+    finally:
+        telemetry.end()
+
+
+async def _trace_async_items(
+    source: AsyncIterator[Any], telemetry: SpanTelemetry, options: GenAICaptureOptions
+) -> AsyncGenerator[Any, None]:
+    """The async version of _trace_items."""
+    stream = _StreamAggregator()
+    first = True
+    try:
+        async for item in source:
+            if first:
+                telemetry.record_time_to_first_token()
+                first = False
+            stream.add(item)
+            yield item
+        _set_attributes_safely(telemetry, lambda: _stream_attributes(stream, options))
+        telemetry.set_status({"code": StatusCode.OK})
+    except BaseException as e:
+        if not isinstance(e, GeneratorExit):
+            telemetry.fail(e)
+        raise
+    finally:
+        telemetry.end()
+
+
+class _TracedStream:
+    """A model call's stream, such as `create(stream=True)` returns.
+
+    Iterating it iterates the stream. The span ends once the stream has been read to the end, or
+    when the stream is closed. Other attributes and methods are the stream's.
+    """
+
+    def __init__(self, stream: Any, telemetry: SpanTelemetry, options: GenAICaptureOptions):
+        self._stream = stream
+        self._telemetry = telemetry
+        self._items = _trace_items(iter(stream), telemetry, options)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+    def __iter__(self) -> "_TracedStream":
+        return self
+
+    def __next__(self) -> Any:
+        return next(self._items)
+
+    def __enter__(self) -> "_TracedStream":
+        return self
+
+    def __exit__(self, *exc_info: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        try:
+            close = getattr(self._stream, "close", None)
+            if callable(close):
+                close()
+        finally:
+            self._end_span()
+
+    def _end_span(self) -> None:
+        self._items.close()
+        self._telemetry.end()
+
+
+class _TracedResponseStream(_TracedStream):
+    """The stream `responses.stream()` gives, read through the span's stream."""
+
+    def until_done(self) -> "_TracedResponseStream":
+        for _ in self:
+            pass
+        return self
+
+    def get_final_response(self) -> Any:
+        self.until_done()
+        return self._stream.get_final_response()
+
+
+class _TracedStreamManager:
+    """The stream manager `responses.stream()` returns.
+
+    The request is sent when the manager is entered, so the span starts then, and the request is
+    sent with the span active. The span ends when the stream has been read to the end, or when
+    the manager exits.
+    """
+
+    def __init__(
+        self,
+        manager: Any,
+        start_span: Callable[[], SpanTelemetry],
+        options: GenAICaptureOptions,
+    ):
+        self._manager = manager
+        self._start_span = start_span
+        self._options = options
+        self._stream: Optional[_TracedResponseStream] = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._manager, name)
+
+    def __enter__(self) -> _TracedResponseStream:
+        telemetry = self._start_span()
+        try:
+            with _activated(trace.set_span_in_context(telemetry.span)):
+                stream = self._manager.__enter__()
+        except BaseException as e:
+            _end_failed(telemetry, e)
+            raise
+        telemetry.set_attributes({"gen_ai.request.stream": True})
+        self._stream = _TracedResponseStream(stream, telemetry, self._options)
+        return self._stream
+
+    def __exit__(self, *exc_info: Any) -> Any:
+        try:
+            return self._manager.__exit__(*exc_info)
+        finally:
+            if self._stream is not None:
+                self._stream._end_span()
+
+
+class _AsyncTracedStream:
+    """The async version of _TracedStream."""
+
+    def __init__(self, stream: Any, telemetry: SpanTelemetry, options: GenAICaptureOptions):
+        self._stream = stream
+        self._telemetry = telemetry
+        self._items = _trace_async_items(stream.__aiter__(), telemetry, options)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+    def __aiter__(self) -> "_AsyncTracedStream":
+        return self
+
+    async def __anext__(self) -> Any:
+        return await self._items.__anext__()
+
+    async def __aenter__(self) -> "_AsyncTracedStream":
+        return self
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        try:
+            close = getattr(self._stream, "close", None)
+            if callable(close):
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+        finally:
+            await self._end_span()
+
+    async def _end_span(self) -> None:
+        await self._items.aclose()
+        self._telemetry.end()
+
+
+class _AsyncTracedResponseStream(_AsyncTracedStream):
+    """The async version of _TracedResponseStream."""
+
+    async def until_done(self) -> "_AsyncTracedResponseStream":
+        async for _ in self:
+            pass
+        return self
+
+    async def get_final_response(self) -> Any:
+        await self.until_done()
+        return await self._stream.get_final_response()
+
+
+class _AsyncTracedStreamManager:
+    """The async version of _TracedStreamManager."""
+
+    def __init__(
+        self,
+        manager: Any,
+        start_span: Callable[[], SpanTelemetry],
+        options: GenAICaptureOptions,
+    ):
+        self._manager = manager
+        self._start_span = start_span
+        self._options = options
+        self._stream: Optional[_AsyncTracedResponseStream] = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._manager, name)
+
+    async def __aenter__(self) -> _AsyncTracedResponseStream:
+        telemetry = self._start_span()
+        try:
+            with _activated(trace.set_span_in_context(telemetry.span)):
+                stream = await self._manager.__aenter__()
+        except BaseException as e:
+            _end_failed(telemetry, e)
+            raise
+        telemetry.set_attributes({"gen_ai.request.stream": True})
+        self._stream = _AsyncTracedResponseStream(stream, telemetry, self._options)
+        return self._stream
+
+    async def __aexit__(self, *exc_info: Any) -> Any:
+        try:
+            return await self._manager.__aexit__(*exc_info)
+        finally:
+            if self._stream is not None:
+                await self._stream._end_span()
 
 
 class OpenAIWrapper(BaseWrapper):
     def __init__(self, oai_client: Any, options: WrapOpenAIOptions):
-        super().__init__(oai_client, "", options)
+        super().__init__(oai_client, options)
 
         # Chat Completions
         if hasattr(oai_client, "chat"):
@@ -472,35 +658,39 @@ class OpenAIWrapper(BaseWrapper):
 
 class ChatWrapper(BaseWrapper):
     def __init__(self, chat, options: WrapOpenAIOptions):
-        super().__init__(chat, "openai.chat.completions.create", options)
+        super().__init__(chat, options)
         self.completions = ChatCompletionsWrapper(chat.completions, options)
 
 
 class ChatCompletionsWrapper(BaseWrapper):
     def __init__(self, completions, options: WrapOpenAIOptions):
-        super().__init__(completions, "openai.chat.completions.create", options)
-        self.create = self._wrap_call("create")
+        super().__init__(completions, options)
+        self.create = self._wrap_call("create", "openai.chat.completions.create")
 
 
 class CompletionsWrapper(BaseWrapper):
     def __init__(self, completions, options: WrapOpenAIOptions):
-        super().__init__(completions, "openai.completions.create", options)
-        self.create = self._wrap_call("create")
+        super().__init__(completions, options)
+        self.create = self._wrap_call("create", "openai.completions.create")
 
 
 class EmbeddingsWrapper(BaseWrapper):
     def __init__(self, embeddings, options: WrapOpenAIOptions):
-        super().__init__(embeddings, "openai.embeddings.create", options)
-        self.create = self._wrap_call("create")
+        super().__init__(embeddings, options)
+        self.create = self._wrap_call("create", "openai.embeddings.create")
 
 
 class ImagesWrapper(BaseWrapper):
     def __init__(self, images, options: WrapOpenAIOptions):
-        super().__init__(images, "openai.images.generate", options)
-        self.generate = self._wrap_call("generate")
+        super().__init__(images, options)
+        self.generate = self._wrap_call("generate", "openai.images.generate")
 
 
 class ResponsesWrapper(BaseWrapper):
     def __init__(self, responses, options: WrapOpenAIOptions):
-        super().__init__(responses, "openai.responses.create", options)
-        self.create = self._wrap_call("create")
+        super().__init__(responses, options)
+        self.create = self._wrap_call("create", "openai.responses.create")
+        if hasattr(responses, "parse"):
+            self.parse = self._wrap_call("parse", "openai.responses.parse")
+        if hasattr(responses, "stream"):
+            self.stream = self._wrap_stream_manager("stream", "openai.responses.stream")

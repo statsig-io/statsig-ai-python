@@ -67,6 +67,21 @@ If there's no agent config with that name, `get_agent_config` still returns one.
 
 Messages are only recorded when you opt in with `GenAICaptureOptions` (for example `wrap_openai(OpenAI(), WrapOpenAIOptions(GenAICaptureOptions(capture_all=True)))`). `gen_ai.input.messages`, `gen_ai.output.messages` and `gen_ai.system_instructions` are recorded in the [OpenTelemetry GenAI message format](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/) (`role` + `parts` such as `text`, `tool_call` and `tool_call_response`). System and developer messages, and the Responses API `instructions`, are recorded as system instructions rather than input messages.
 
+`wrap_openai()` traces `chat.completions.create`, `completions.create`, `embeddings.create`, `images.generate`, and the Responses API's `create`, `parse` and `stream`, on sync and async clients. Each call runs with its span active, so spans started during the call, such as HTTP client spans, are its children. Input messages and system instructions are recorded when the call starts, so failed and streamed calls have them too. A streamed call's span ends once you've read the stream to the end, with the streamed output and token usage, or when you close the stream. The span of `responses.stream()` starts when you enter the stream manager, which is when the request is sent.
+
+`WrapOpenAIOptions` also takes `custom_attributes`, which are set on every span the wrapper creates and on its `statsig::gen_ai` event, and `max_json_chars`, the length JSON attributes such as messages are cut to (40,000 by default):
+
+```python
+openai = wrap_openai(
+    OpenAI(),
+    WrapOpenAIOptions(
+        GenAICaptureOptions(capture_all=True),
+        custom_attributes={"app.team": "support"},
+        max_json_chars=20_000,
+    ),
+)
+```
+
 ### Tracing Gemini calls
 
 `wrap_gemini()` wraps a [google-genai](https://pypi.org/project/google-genai/) `Client`. It records `client.models.generate_content` and `generate_content_stream`, and their async versions on `client.aio.models`, as `generate_content <model>` spans with `gen_ai.provider.name=gcp.gen_ai`, and logs a `statsig::gen_ai` event for each call. It takes the same `WrapOpenAIOptions` as `wrap_openai()`. google-genai isn't a dependency of this SDK, so install it yourself.

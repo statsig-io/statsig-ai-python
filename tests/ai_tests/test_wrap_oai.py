@@ -390,10 +390,10 @@ def validate_embeddings_attributes(metadata: Dict[str, str], kwargs: Dict[str, A
         assert (
             "gen_ai.request.encoding_formats" in metadata
         ), "Missing 'gen_ai.request.encoding_formats' for embeddings operation with encoding_format"
-        encoding_format = metadata["gen_ai.request.encoding_formats"]
-        assert (
-            encoding_format == kwargs["encoding_format"]
-        ), f"Expected encoding format '{kwargs['encoding_format']}', got '{encoding_format}'"
+        encoding_formats = json.loads(metadata["gen_ai.request.encoding_formats"])
+        assert encoding_formats == [
+            kwargs["encoding_format"]
+        ], f"Expected encoding formats ['{kwargs['encoding_format']}'], got {encoding_formats}"
 
 
 def validate_capture_options(
