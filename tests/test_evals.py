@@ -1,6 +1,9 @@
 import asyncio
 import json
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 from opentelemetry import trace
@@ -23,6 +26,7 @@ from statsig_ai import (
     wrap_openai,
 )
 from statsig_ai.evals import EvalAsync
+from statsig_ai.evals import eval as eval_module
 from statsig_ai.evals.eval_types import ScoreWithMetadata
 from statsig_ai.otel.conventions import (
     STATSIG_ATTR_ENVIRONMENT,
@@ -1405,6 +1409,183 @@ def test_eval_task_that_raises_scores_zero_on_every_scorer(eval_setup, run_eval,
     }
 
 
+def _async_task_with_hook(fn):
+    async def task(input, hook):
+        return fn(input, hook)
+
+    return task
+
+
+@pytest.mark.parametrize("wrap_task", [_sync_task, _async_task], ids=["sync", "async"])
+def test_eval_sends_how_long_the_task_took_as_latency_ms(
+    eval_setup, run_eval, wrap_task, monkeypatch
+):
+    mock_scrapi = eval_setup
+    now = [1.0]
+    monkeypatch.setattr(eval_module, "time", SimpleNamespace(perf_counter=lambda: now[0]))
+
+    def task(input):
+        now[0] += 0.2504
+        return input
+
+    def scorer(args):
+        # Scoring isn't part of the task's latency.
+        now[0] += 1.0
+        return 1
+
+    result = run_eval("latency", data=[{"input": "a"}], task=wrap_task(task), scorer=scorer)
+
+    assert result.results[0].latency_ms == 250
+    [payload_record] = mock_scrapi.get_eval_payloads()[0]["results"]
+    assert payload_record["latencyMs"] == 250
+
+
+@pytest.mark.parametrize("wrap_task", [_sync_task, _async_task_with_hook], ids=["sync", "async"])
+def test_eval_sends_the_sum_of_the_tokens_a_task_reports(eval_setup, run_eval, wrap_task):
+    mock_scrapi = eval_setup
+
+    def task(input, hook):
+        hook.report_tokens(120, 30)
+        hook.report_tokens(80, 12)
+        return input
+
+    result = run_eval("tokens", data=[{"input": "a"}], task=wrap_task(task), scorer=lambda args: 1)
+
+    record = result.results[0]
+    assert (record.input_tokens, record.output_tokens) == (200, 42)
+    assert isinstance(record.latency_ms, int)
+    [payload_record] = mock_scrapi.get_eval_payloads()[0]["results"]
+    assert payload_record["inputTokens"] == 200
+    assert payload_record["outputTokens"] == 42
+    assert payload_record["latencyMs"] == record.latency_ms
+
+
+def test_eval_counts_each_sync_tasks_tokens_on_its_own_record(eval_setup, run_eval):
+    mock_scrapi = eval_setup
+    # Holds every task until all three are running, each in its own worker thread.
+    all_running = threading.Barrier(3, timeout=5)
+
+    def task(input, hook):
+        all_running.wait()
+        count = int(input)
+        # A task can also report from threads of its own, such as parallel model calls.
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            list(executor.map(lambda _: hook.report_tokens(count, 10 * count), range(2)))
+        return input
+
+    result = run_eval(
+        "sync tokens",
+        data=[{"input": "1"}, {"input": "2"}, {"input": "3"}],
+        task=task,
+        scorer=lambda args: 1,
+    )
+
+    assert [(r.input_tokens, r.output_tokens) for r in result.results] == [
+        (2, 20),
+        (4, 40),
+        (6, 60),
+    ]
+    payload = mock_scrapi.get_eval_payloads()[0]
+    assert [(r["inputTokens"], r["outputTokens"]) for r in payload["results"]] == [
+        (2, 20),
+        (4, 40),
+        (6, 60),
+    ]
+
+
+@pytest.mark.parametrize("wrap_task", [_sync_task, _async_task_with_hook], ids=["sync", "async"])
+def test_eval_sends_no_tokens_for_a_record_whose_task_never_reports_them(
+    eval_setup, run_eval, wrap_task
+):
+    mock_scrapi = eval_setup
+
+    def task(input, hook):
+        if input == "reports":
+            hook.report_tokens(10, 2)
+        return input
+
+    result = run_eval(
+        "no tokens",
+        data=[{"input": "reports"}, {"input": "silent"}],
+        task=wrap_task(task),
+        scorer=lambda args: 1,
+    )
+
+    reports, silent = result.results
+    assert (reports.input_tokens, reports.output_tokens) == (10, 2)
+    assert (silent.input_tokens, silent.output_tokens) == (None, None)
+    assert isinstance(silent.latency_ms, int)
+    reports_payload, silent_payload = mock_scrapi.get_eval_payloads()[0]["results"]
+    assert (reports_payload["inputTokens"], reports_payload["outputTokens"]) == (10, 2)
+    assert isinstance(silent_payload["latencyMs"], int)
+    assert "inputTokens" not in silent_payload
+    assert "outputTokens" not in silent_payload
+
+
+@pytest.mark.parametrize("wrap_task", [_sync_task, _async_task_with_hook], ids=["sync", "async"])
+def test_eval_sends_no_latency_or_tokens_for_a_record_whose_task_raises(
+    eval_setup, run_eval, wrap_task
+):
+    mock_scrapi = eval_setup
+
+    def task(input, hook):
+        hook.report_tokens(10, 2)
+        raise ValueError("Task failed")
+
+    result = run_eval("raises", data=[{"input": "boom"}], task=wrap_task(task), scorer=lambda args: 1)
+
+    record = result.results[0]
+    assert record.error == True
+    assert (record.latency_ms, record.input_tokens, record.output_tokens) == (None, None, None)
+    [payload_record] = mock_scrapi.get_eval_payloads()[0]["results"]
+    assert payload_record["error"] == True
+    assert not {"latencyMs", "inputTokens", "outputTokens"} & payload_record.keys()
+
+
+def test_eval_ignores_token_counts_the_api_would_reject(eval_setup, run_eval, caplog):
+    def task(input, hook):
+        hook.report_tokens(float("nan"), 5)
+        hook.report_tokens(5, -1)
+        hook.report_tokens(True, 5)
+        hook.report_tokens(None, 5)
+        hook.report_tokens(7, 3)
+        return input
+
+    result = run_eval("bad tokens", data=[{"input": "a"}], task=task, scorer=lambda args: 1)
+
+    record = result.results[0]
+    assert record.error == False
+    assert (record.input_tokens, record.output_tokens) == (7, 3)
+    warnings = [r.getMessage() for r in caplog.records if "report_tokens()" in r.getMessage()]
+    assert len(warnings) == 4
+    assert "input_tokens=5, output_tokens=-1" in warnings[1]
+
+
+def test_eval_ignores_tokens_reported_after_the_task_returns(eval_setup, run_eval):
+    hooks = []
+
+    def task(input, hook):
+        hooks.append(hook)
+        hook.report_tokens(10, 2)
+        return input
+
+    def scorer(args):
+        hooks[0].report_tokens(100, 100)
+        return 1
+
+    result = run_eval("late tokens", data=[{"input": "a"}], task=task, scorer=scorer)
+
+    assert (result.results[0].input_tokens, result.results[0].output_tokens) == (10, 2)
+
+
+def test_eval_hook_built_by_hand_reports_tokens_without_serializing_them():
+    hook = EvalHook(parameters={"model": "gpt-4o-mini"})
+    hook.report_tokens(10, 2)
+
+    assert hook.to_dict() == {"parameters": {"model": "gpt-4o-mini"}}
+    assert hook == EvalHook(parameters={"model": "gpt-4o-mini"})
+
+
 def test_eval_sends_non_string_values_as_json_strings(eval_setup, run_eval):
     mock_scrapi = eval_setup
 
@@ -1735,6 +1916,7 @@ def test_eval_on_statsig_dataset_loads_every_page_and_posts_row_ids(eval_setup, 
     assert payloads[0]["dataset"] == "golden"
     payload_results = {r["rowID"]: r for r in payloads[0]["results"]}
     assert len(payload_results) == 101
+    assert isinstance(payload_results["row-100"].pop("latencyMs"), int)
     assert payload_results["row-100"] == {
         "input": "q100",
         "expected": "a100",

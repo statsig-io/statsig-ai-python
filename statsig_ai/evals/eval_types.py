@@ -1,3 +1,6 @@
+import logging
+import math
+import threading
 from typing import (
     Awaitable,
     Callable,
@@ -6,6 +9,7 @@ from typing import (
     Iterator,
     Protocol,
     Sequence,
+    Tuple,
     Type,
     TypeVar,
     Generic,
@@ -140,6 +144,11 @@ class EvalResultRecordWithMetadata(SerializableDataClass, Generic[Input, Output]
     # Trace and root span of the record's run, as lowercase hex. Set when tracing is initialized.
     trace_id: Optional[str] = None
     span_id: Optional[str] = None
+    # Milliseconds the task took to produce its output. None when the task raised.
+    latency_ms: Optional[int] = None
+    # Totals the task reported with `EvalHook.report_tokens`. None when it reported none or raised.
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
 @dataclass
 class EvalResultRecord(SerializableDataClass, Generic[Input, Output]):
@@ -153,6 +162,11 @@ class EvalResultRecord(SerializableDataClass, Generic[Input, Output]):
     # Trace and root span of the record's run, as lowercase hex. Set when tracing is initialized.
     trace_id: Optional[str] = None
     span_id: Optional[str] = None
+    # Milliseconds the task took to produce its output. None when the task raised.
+    latency_ms: Optional[int] = None
+    # Totals the task reported with `EvalHook.report_tokens`. None when it reported none or raised.
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
 
 @dataclass
@@ -171,11 +185,56 @@ class EvalResult(SerializableDataClass, Generic[Input, Output]):
 # default before any task runs.
 EvalParameters = Dict[str, Any]
 
+# Guards every hook's token totals. A sync task runs in a worker thread, and can
+# report tokens from threads of its own.
+_TOKEN_TOTALS_LOCK = threading.Lock()
+
+
+def _is_token_count(value: Any) -> bool:
+    # A bool is an int, but not a count. Ints aren't passed to isfinite, which
+    # raises for ones too large for a float.
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value >= 0
+    return isinstance(value, float) and math.isfinite(value) and value >= 0
+
 
 @dataclass
 class EvalHook(SerializableDataClass):
+    """The optional second argument of an eval's task. Each record gets its own."""
+
     parameters: Optional[EvalParameters] = None
     category: Optional[Union[Sequence[str], str]] = None
+
+    def __post_init__(self) -> None:
+        # Input and output tokens the task reported. Not a field, so it isn't
+        # serialized or compared.
+        self._token_totals: Optional[Tuple[int, int]] = None
+
+    def report_tokens(self, input_tokens: int, output_tokens: int) -> None:
+        """
+        Report the tokens the task used to produce its output. Each call adds to the
+        record's totals, so a multi-step task can call it once per model call or once
+        with its total. The totals are sent with the record's result as `inputTokens`
+        and `outputTokens`. A record whose task never calls this, or raises, sends no
+        tokens, and calls made after the task returns don't count.
+
+        Counts must be ints, or finite floats, of at least 0. A call with any other
+        count is ignored with a warning, since one bad count would make the API reject
+        every result in the run.
+        """
+        if not _is_token_count(input_tokens) or not _is_token_count(output_tokens):
+            logging.warning(
+                "[Statsig] report_tokens() needs input_tokens and output_tokens of at least 0. "
+                "Ignoring: input_tokens=%r, output_tokens=%r",
+                input_tokens,
+                output_tokens,
+            )
+            return
+        with _TOKEN_TOTALS_LOCK:
+            total_input, total_output = self._token_totals or (0, 0)
+            self._token_totals = (total_input + input_tokens, total_output + output_tokens)
 
 
 EvalTask = Union[

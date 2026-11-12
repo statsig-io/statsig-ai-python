@@ -4,6 +4,7 @@ import functools
 import inspect
 import logging
 import os
+import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -216,6 +217,12 @@ def _serialize_record(record: EvalResultRecordWithMetadata[Input, Output]) -> Di
         serialized["traceID"] = record.trace_id
     if record.span_id is not None:
         serialized["spanID"] = record.span_id
+    if record.latency_ms is not None:
+        serialized["latencyMs"] = record.latency_ms
+    if record.input_tokens is not None:
+        serialized["inputTokens"] = record.input_tokens
+    if record.output_tokens is not None:
+        serialized["outputTokens"] = record.output_tokens
     return serialized
 
 
@@ -295,13 +302,29 @@ def _get_task_args(
     raise TypeError(f"Invalid task signature: expected 1 or 2 parameters, got {num_args}")
 
 
-async def _run_task(task: EvalTask[Input, Output], args: Tuple[Any, ...]) -> Output:
-    """Run the task on one input. Exceptions propagate."""
+def _elapsed_ms(start: float) -> int:
+    return round((time.perf_counter() - start) * 1000)
+
+
+async def _run_task(task: EvalTask[Input, Output], args: Tuple[Any, ...]) -> Tuple[Output, int]:
+    """
+    Run the task on one input. Returns its output and the whole milliseconds it took
+    to produce it, by a monotonic clock. Exceptions propagate.
+    """
     if inspect.iscoroutinefunction(task):
-        return await task(*args)
+        start = time.perf_counter()
+        output = await task(*args)
+        return output, _elapsed_ms(start)
+
+    def run_timed() -> Tuple[Output, int]:
+        # Timed in the thread, so the wait for a free worker thread isn't counted.
+        start = time.perf_counter()
+        output = cast(Output, task(*args))
+        return output, _elapsed_ms(start)
+
     # Unlike run_in_executor, to_thread copies the context into the thread, so the
     # model calls of a sync task join the record's trace and environment.
-    return cast(Output, await asyncio.to_thread(task, *args))
+    return await asyncio.to_thread(run_timed)
 
 
 async def _run_scorer(
@@ -439,22 +462,26 @@ async def _run_task_and_score_one_record(
     Runs the task first, then runs all scorers concurrently on the output, inside
     `statsig_environment("eval")`. With `record_span_attributes` (tracing is
     initialized), the record runs in its own trace and each scorer in a child span.
-    - If task errors: all scores are 0 and error flag is set
+    The task's latency and the tokens it reported are kept on the result.
+    - If task errors: all scores are 0, error flag is set, and there's no latency or tokens
     - If a scorer errors: that score is "0" (handled in _run_scorer)
     """
     trace_records = record_span_attributes is not None
-    task_args = _get_task_args(
-        task, data_record.input, EvalHook(parameters=parameters, category=data_record.category)
-    )
+    hook = EvalHook(parameters=parameters, category=data_record.category)
+    task_args = _get_task_args(task, data_record.input, hook)
     output: Any = None
     scores: Dict[str, ScoreWithMetadata] = {}
     error = False
     trace_id: Optional[str] = None
     span_id: Optional[str] = None
+    latency_ms: Optional[int] = None
+    token_totals: Optional[Tuple[int, int]] = None
 
     async def run_task_and_scorers() -> None:
-        nonlocal output
-        task_output = await _run_task(task, task_args)
+        nonlocal output, latency_ms, token_totals
+        task_output, latency_ms = await _run_task(task, task_args)
+        # Read once the output is ready, so tokens reported after that don't count.
+        token_totals = hook._token_totals
         output = task_output
 
         def score(
@@ -480,10 +507,14 @@ async def _run_task_and_score_one_record(
         if output is None:
             output = _TASK_ERROR_OUTPUT
         error = True
+        # A failed record sends no latency or tokens, even ones reported before it raised.
+        latency_ms = None
+        token_totals = None
         scores = {
             scorer_name: ScoreWithMetadata(score=0.0, metadata=None) for scorer_name in scorers
         }
 
+    input_tokens, output_tokens = token_totals or (None, None)
     return EvalResultRecordWithMetadata(
         input=data_record.input,
         expected=data_record.expected,
@@ -494,6 +525,9 @@ async def _run_task_and_score_one_record(
         error=error,
         trace_id=trace_id,
         span_id=span_id,
+        latency_ms=latency_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
 
 
@@ -518,6 +552,9 @@ def _convert_results_to_results_without_metadata(
         row_id=result.row_id,
         trace_id=result.trace_id,
         span_id=result.span_id,
+        latency_ms=result.latency_ms,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
     ) for result in results_with_metadata]
     return results_without_metadata
 
@@ -637,7 +674,9 @@ def Eval(
         name: Name of the evaluation
         data: Evaluation data (iterable of records, can be async), or a Statsig dataset from
             `statsig_dataset()`
-        task: Task function(s) to run on each input (can be async)
+        task: Task function(s) to run on each input (can be async). Each call is timed and
+            sent as the record's latency. A task that takes an `EvalHook` as its second
+            argument can report its tokens with `hook.report_tokens()`.
         scorer: Scorer function(s) to evaluate outputs (can be async, can be dict)
         parameters: Optional parameters to pass to tasks. A pydantic `Field(default=...)` or
             `Field(default_factory=...)` value is resolved to its default before any task runs.
@@ -720,7 +759,9 @@ async def EvalAsync(
         name: Name of the evaluation
         data: Evaluation data (iterable of records, can be async), or a Statsig dataset from
             `statsig_dataset()`
-        task: Task function(s) to run on each input (can be async)
+        task: Task function(s) to run on each input (can be async). Each call is timed and
+            sent as the record's latency. A task that takes an `EvalHook` as its second
+            argument can report its tokens with `hook.report_tokens()`.
         scorer: Scorer function(s) to evaluate outputs (can be async, can be dict)
         parameters: Optional parameters to pass to tasks. A pydantic `Field(default=...)` or
             `Field(default_factory=...)` value is resolved to its default before any task runs.

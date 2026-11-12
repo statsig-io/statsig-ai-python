@@ -347,6 +347,39 @@ Eval(
 
 To post your own records for a dataset instead, set `dataset` and give each record the `row_id` of its dataset row.
 
+## Latency and tokens
+
+`Eval()` and `EvalAsync()` time each record's `task`, from the call until its output is ready, and send that with the result as `latencyMs`. Scorers aren't part of it. A plain function is timed in its worker thread, so waiting for a free thread isn't counted.
+
+The runner can't see your model calls, so the task reports its tokens with `report_tokens` on the `EvalHook` it gets as its second argument. Each call adds to the record's totals, so a task that makes several model calls can report each one, or its total once. The totals are sent as `inputTokens` and `outputTokens`.
+
+```python
+from openai import OpenAI
+from statsig_ai import Eval, EvalHook
+
+client = OpenAI()
+
+
+def task(input: str, hook: EvalHook) -> str:
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": input}],
+    )
+    if response.usage:
+        hook.report_tokens(response.usage.prompt_tokens, response.usage.completion_tokens)
+    return response.choices[0].message.content or ""
+
+
+Eval(
+    "support_bot_quality",
+    data=data,
+    task=task,
+    scorer=lambda args: args.output == args.expected,
+)
+```
+
+The run page shows a Latency column, and a Tokens column when the task reported tokens. Neither is graded. Each result also has them as `latency_ms`, `input_tokens` and `output_tokens`. A record whose task raises sends neither, and a record whose task never calls `report_tokens` sends no tokens. `report_tokens` ignores a call whose counts aren't ints or finite floats of at least 0, and logs a warning.
+
 ## Community
 
 If you need any assistance or just have a question, feel free to reach out to us on [Slack](https://statsig.com/community?ref=gh_jsm).
