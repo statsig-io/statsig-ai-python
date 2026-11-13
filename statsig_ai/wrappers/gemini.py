@@ -55,7 +55,7 @@ class GeminiWrapper:
 
     def __init__(self, client: Any, options: WrapOpenAIOptions):
         self._client = client
-        self.models = GeminiModelsWrapper(client.models, options.gen_ai_capture_options)
+        self.models = GeminiModelsWrapper(client.models, options)
         aio = getattr(client, "aio", None)
         if _has_generate_content(aio):
             self.aio = GeminiWrapper(aio, options)
@@ -65,9 +65,10 @@ class GeminiWrapper:
 
 
 class GeminiModelsWrapper:
-    def __init__(self, models: Any, capture_options: GenAICaptureOptions):
+    def __init__(self, models: Any, options: WrapOpenAIOptions):
         self._models = models
-        self._capture_options = capture_options
+        self._wrap_options = options
+        self._capture_options = options.gen_ai_capture_options
         for method_name, source_name in WRAPPED_METHODS.items():
             original = getattr(models, method_name, None)
             if callable(original):
@@ -103,7 +104,7 @@ class GeminiModelsWrapper:
             f"{OPERATION_NAME} {model if model is not None else 'unknown'}",
             PROVIDER_NAME,
             extract_gemini_request_attributes(source_name, kwargs, capture),
-            capture,
+            self._wrap_options,
         )
         return trace_gen_ai_call(
             telemetry,

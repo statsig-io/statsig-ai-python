@@ -650,6 +650,56 @@ def test_calls_inside_a_prompt_scope_are_tagged_with_the_version(
         assert STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES not in attrs
 
 
+# ---------- custom_attributes and max_json_chars ----------
+
+
+def test_custom_attributes_are_set_on_every_span_and_event(tracing):
+    client = wrap_anthropic(
+        MockAnthropic(RESPONSE, stream_events_for(RESPONSE)),
+        WrapOpenAIOptions(
+            custom_attributes={"app.team": "growth", "app.retries": 2, "gen_ai.provider.name": "x"}
+        ),
+    )
+
+    client.messages.create(**make_request())
+    list(client.messages.create(**make_request(stream=True)))
+    with client.messages.stream(**make_request()) as stream:
+        stream.get_final_message()
+
+    spans = tracing.spans()
+    assert len(spans) == 3
+    events = [metadata for _, _, metadata in tracing.statsig.events]
+    for span, started, event in zip(spans, tracing.started.spans, events):
+        attrs = dict(span.attributes or {})
+        assert attrs["app.team"] == "growth"
+        assert attrs["app.retries"] == 2
+        # The wrapper's own attributes win, as in the Node SDK.
+        assert attrs["gen_ai.provider.name"] == "anthropic"
+        assert started["app.team"] == "growth"
+        assert event["app.team"] == "growth"
+        assert event["app.retries"] == "2"
+
+
+def test_max_json_chars_caps_json_attributes(tracing):
+    content = "x" * 100
+    client = wrap_anthropic(
+        MockAnthropic(RESPONSE, stream_events_for(RESPONSE)),
+        WrapOpenAIOptions(GenAICaptureOptions(capture_input_messages=True), max_json_chars=50),
+    )
+
+    client.messages.create(
+        model="claude-test", max_tokens=16, messages=[{"role": "user", "content": content}]
+    )
+
+    full = json.dumps(
+        [{"role": "user", "parts": [{"type": "text", "content": content}]}], separators=(",", ":")
+    )
+    attrs = tracing.attrs()
+    assert attrs[INPUT] == full[:50] + "…(truncated)"
+    assert attrs[f"{INPUT}_len"] == len(full)
+    assert tracing.event()[INPUT] == attrs[INPUT]
+
+
 # ---------- Wrapping ----------
 
 

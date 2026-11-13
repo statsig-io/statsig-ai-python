@@ -19,7 +19,7 @@ from ..otel.conventions import (
 from ..otel.environment_context import get_environment_span_attrs_from_context
 from ..otel.prompt_context import get_prompt_span_attrs_from_context
 from ..otel.statsig_context import get_statsig_span_attrs_from_context
-from .configs import GenAICaptureOptions
+from .configs import WrapOpenAIOptions
 from .span_telemetry import SpanTelemetry
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ def start_gen_ai_span(
     span_name: str,
     provider_name: str,
     base_attrs: Mapping[str, Any],
-    capture_options: GenAICaptureOptions,
+    options: WrapOpenAIOptions,
 ) -> SpanTelemetry:
     """Starts a client span for one model call, tagged with the active Statsig prompt, prompt
     version, context and environment, so it can be graded and attributed.
@@ -44,6 +44,7 @@ def start_gen_ai_span(
     input messages. The call is the LLM root unless a workflow span has set the marker in the
     context.
     """
+    capture_options = options.gen_ai_capture_options
     ctx = otel_context.get_current()
     statsig_attrs: Dict[str, Any] = {STATSIG_ATTR_SPAN_TYPE: StatsigSpanType.GEN_AI}
     llm_root = otel_context.get_value(STATSIG_CTX_KEY_LLM_ROOT, ctx)
@@ -62,14 +63,17 @@ def start_gen_ai_span(
     statsig_attrs.update(get_statsig_span_attrs_from_context(ctx) or {})
     statsig_attrs.update(get_environment_span_attrs_from_context(ctx) or {})
 
-    attributes = {**base_attrs, **statsig_attrs}
+    # As in the Node SDK, the wrapper's own attributes win over custom attributes.
+    attributes = {**options.custom_attributes, **base_attrs, **statsig_attrs}
     # Messages and template variables are dicts and lists. SpanTelemetry writes them as capped
     # JSON below, so the span starts with the plain values only.
     start_attrs = {
         k: v for k, v in attributes.items() if v is not None and not isinstance(v, (dict, list))
     }
     span = tracer.start_span(span_name, context=ctx, kind=SpanKind.CLIENT, attributes=start_attrs)
-    telemetry = SpanTelemetry(span, span_name, provider_name=provider_name)
+    telemetry = SpanTelemetry(
+        span, span_name, provider_name=provider_name, max_json_chars=options.max_json_chars
+    )
     telemetry.set_attributes(attributes)
     return telemetry
 

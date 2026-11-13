@@ -612,6 +612,52 @@ def test_the_span_is_tagged_with_the_active_prompt_version(tracing, capture, inc
         assert STATSIG_ATTR_LLM_PROMPT_TEMPLATE_VARIABLES not in attrs
 
 
+# custom_attributes and max_json_chars
+
+
+def test_custom_attributes_are_set_on_every_span_and_event(tracing):
+    client = wrap_gemini(
+        MockGeminiClient(Behavior(response=text_response("ok"), chunks=STREAM_CHUNKS)),
+        WrapOpenAIOptions(
+            custom_attributes={"app.team": "growth", "app.retries": 2, "gen_ai.provider.name": "x"}
+        ),
+    )
+
+    client.models.generate_content(model="gemini-call", contents="Hi")
+    list(client.models.generate_content_stream(model="gemini-stream", contents="Hi"))
+    asyncio.run(client.aio.models.generate_content(model="gemini-async", contents="Hi"))
+
+    spans = tracing.spans()
+    assert len(spans) == 3
+    for span, event in zip(spans, tracing.statsig.events):
+        attrs = dict(span.attributes or {})
+        assert attrs["app.team"] == "growth"
+        assert attrs["app.retries"] == 2
+        # The wrapper's own attributes win, as in the Node SDK.
+        assert attrs["gen_ai.provider.name"] == "gcp.gen_ai"
+        assert tracing.started.by_span[span.name]["app.team"] == "growth"
+        assert event["app.team"] == "growth"
+        assert event["app.retries"] == "2"
+
+
+def test_max_json_chars_caps_json_attributes(tracing):
+    content = "x" * 100
+    client = wrap_gemini(
+        MockGeminiClient(Behavior(response=text_response("ok"))),
+        WrapOpenAIOptions(GenAICaptureOptions(capture_input_messages=True), max_json_chars=50),
+    )
+
+    client.models.generate_content(model="gemini-test", contents=content)
+
+    full = json.dumps(
+        [{"role": "user", "parts": [{"type": "text", "content": content}]}], separators=(",", ":")
+    )
+    attrs = tracing.attrs()
+    assert attrs[INPUT] == full[:50] + "…(truncated)"
+    assert attrs[f"{INPUT}_len"] == len(full)
+    assert tracing.statsig.events[0][INPUT] == attrs[INPUT]
+
+
 # Errors
 
 

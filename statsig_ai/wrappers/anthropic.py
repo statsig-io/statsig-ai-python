@@ -86,6 +86,7 @@ class AnthropicWrapper(_Proxy):
 class AnthropicMessagesWrapper(_Proxy):
     def __init__(self, messages: Any, options: WrapOpenAIOptions) -> None:
         super().__init__(messages)
+        self._wrap_options = options
         self._options = options.gen_ai_capture_options
 
     def create(self, *args: Any, **kwargs: Any) -> Any:
@@ -131,7 +132,9 @@ class AnthropicMessagesWrapper(_Proxy):
         attrs = _request_attributes(source_name, params, self._options)
         model = attrs.get("gen_ai.request.model")
         span_name = f"chat {model if model is not None else 'unknown'}"
-        return start_gen_ai_span(_get_tracer(), span_name, _PROVIDER_NAME, attrs, self._options)
+        return start_gen_ai_span(
+            _get_tracer(), span_name, _PROVIDER_NAME, attrs, self._wrap_options
+        )
 
 
 class _TracedMessageStreamManager(_Proxy):

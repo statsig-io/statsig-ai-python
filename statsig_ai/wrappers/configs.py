@@ -14,7 +14,7 @@ class GenAICaptureOptions:
 
 
 class WrapOpenAIOptions:
-    """Options for wrap_openai().
+    """Options for wrap_openai(), wrap_anthropic() and wrap_gemini().
 
     `gen_ai_capture_options` picks the messages and tool definitions to record. None are recorded
     by default. `custom_attributes` are set on every span the wrapper creates, and on its
